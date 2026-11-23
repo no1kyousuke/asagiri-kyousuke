@@ -1,0 +1,4 @@
+# Optional NVIDIA CUDA 12 runtime DLL wheels for CTranslate2 / faster-whisper on Windows.
+# Large downloads; install only if you want GPU inference and these DLLs are not already present.
+nvidia-cublas-cu12>=12.4,<13
+nvidia-cudnn-cu12>=9,<10

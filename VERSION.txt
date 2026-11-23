@@ -1,0 +1,4 @@
+SubFlow Studio Windows Release Package
+Version: 9.2.0 (Windows 11 / RTX 3060 Full Audit & Refactor)
+Build Date: 2026-11-20
+Target Platform: Windows 11 x64 (CUDA 12 / cuDNN 9 / WebView2)

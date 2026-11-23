@@ -1,0 +1,10 @@
+# Windows x64 / Python 3.12 runtime dependencies
+# Keep av pinned: faster-whisper compatibility constraint.
+pywebview==6.2.1
+pythonnet>=3.0.3,<4
+faster-whisper==1.2.1
+ctranslate2==4.9.0
+av==13.1.0
+yt-dlp==2026.10.26
+requests==2.34.2
+qrcode[pil]==8.2

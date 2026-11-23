@@ -1,0 +1,1757 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SubFlow Studio — V9.2 Desktop</title>
+  <link rel="stylesheet" href="tailwind.css">
+  <style>
+
+
+    :root {
+      --accent: #6366f1;
+      --accent-glow: rgba(99, 102, 241, 0.42);
+      --spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+      --spring-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      background-color: #050508;
+      background-image:
+        radial-gradient(circle at 18% 0%, var(--accent-glow), transparent 42%),
+        radial-gradient(circle at 85% 100%, rgba(16, 185, 129, 0.07), transparent 45%);
+      color: #f4f4f6;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      user-select: none;
+      overflow: hidden;
+      transition: background-image 0.5s ease;
+    }
+
+    .font-mono-num { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 999px; }
+
+    .glass-surface {
+      background: rgba(15, 15, 21, 0.76);
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      box-shadow:
+        inset 0 1px 0 0 rgba(255, 255, 255, 0.09),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+        0 24px 60px -15px rgba(0, 0, 0, 0.85);
+    }
+
+    .glass-pill {
+      background: rgba(24, 24, 34, 0.82);
+      backdrop-filter: blur(20px);
+      box-shadow:
+        inset 0 1px 0 0 rgba(255, 255, 255, 0.12),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 10px 30px -5px rgba(0, 0, 0, 0.6);
+    }
+
+    .island-morph {
+      transition:
+        width 0.46s var(--spring-bounce),
+        height 0.46s var(--spring-smooth),
+        border-radius 0.46s var(--spring-smooth),
+        box-shadow 0.35s ease;
+    }
+
+    .glider-pill {
+      transition:
+        transform 0.42s var(--spring-bounce),
+        width 0.36s var(--spring-smooth),
+        height 0.36s var(--spring-smooth),
+        background-color 0.3s ease;
+    }
+
+    /* ============================================================
+       1) 分屏舱体：宽度 / 内边距 / 透明度 / 位移 全部走一条弹簧曲线
+          折叠时才真的有“推拉”过场，而不是 display:none 直接消失
+       ============================================================ */
+    .pane-shell {
+      transition:
+        width 0.54s var(--spring-smooth),
+        flex-basis 0.54s var(--spring-smooth),
+        padding 0.54s var(--spring-smooth),
+        opacity 0.34s ease,
+        transform 0.54s var(--spring-smooth);
+      contain: layout style paint;
+    }
+
+    .pane-collapsed {
+      width: 0 !important;
+      flex: 0 0 auto !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+      border-width: 0 !important;
+    }
+    #left-pane.pane-collapsed { transform: translateX(-22px) scale(0.96); }
+    #right-pane.pane-collapsed { transform: translateX(22px) scale(0.96); }
+
+    /* 左舱撑满：预留 48px 给竖排折叠条 */
+    .pane-max { width: calc(100% - 48px) !important; }
+
+    /* 竖排折叠条：0 ↔ 48px 的宽度过渡，内部用 overflow 裁掉文字 */
+    .rail-shell {
+      overflow: hidden;
+      transition:
+        width 0.54s var(--spring-smooth),
+        opacity 0.3s ease,
+        transform 0.54s var(--spring-bounce),
+        margin 0.54s var(--spring-smooth),
+        padding 0.54s var(--spring-smooth);
+    }
+    .rail-off {
+      width: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      opacity: 0;
+      transform: scale(0.7);
+      pointer-events: none;
+    }
+
+    #split-resizer { transition: width 0.54s var(--spring-smooth), opacity 0.3s ease; }
+    #split-resizer.resizer-off { width: 0 !important; opacity: 0; pointer-events: none; }
+
+    /* ============================================================
+       2) 拖拽性能：拖拽期间只关掉「会随尺寸重算」的重绘源
+          backdrop-filter 会在每一帧重新模糊整个背后画面，这是掉帧主因
+       ============================================================ */
+    body.is-dragging #left-pane.glass-surface,
+    body.is-dragging #right-pane.glass-surface {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.07), 0 10px 30px -18px rgba(0, 0, 0, 0.8) !important;
+    }
+    body.is-dragging .pane-shell {
+      will-change: width, transform;
+      /* translateZ(0) 把舱体提升为独立 GPU 合成层：宽度变化只触发该层重绘，不再整页重排 */
+      transform: translateZ(0);
+      transition: none !important;
+    }
+    body.is-dragging #interactive-canvas,
+    body.is-dragging #stage-box { will-change: transform; }
+    body.is-dragging .sub-squircle-card::before { display: none; }
+    body.is-dragging .wave-pill { transition: none !important; }
+    /* 拖拽时冻结字幕列表布局：文字重排是拖拽的第二掉帧源 */
+    body.is-dragging #sub-cards-wrapper,
+    body.is-dragging .sub-squircle-card {
+      contain: layout style !important;
+    }
+    body.is-dragging #sub-cards-wrapper * { transition: none !important; animation: none !important; }
+
+    .writing-vertical {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      letter-spacing: 0.15em;
+    }
+
+    #sub-active-glider {
+      transition:
+        transform 0.42s var(--spring-bounce),
+        height 0.36s var(--spring-smooth),
+        opacity 0.25s ease;
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.22) 0%, rgba(30, 30, 46, 0.76) 100%);
+      box-shadow:
+        inset 0 1px 0 0 rgba(165, 180, 252, 0.34),
+        inset 0 0 0 1px rgba(99, 102, 241, 0.34),
+        0 14px 34px -8px rgba(0, 0, 0, 0.65);
+    }
+
+    .panel-view {
+      position: absolute !important;
+      inset: 0 !important;
+      width: 100%;
+      height: 100%;
+      transition: opacity 0.28s var(--spring-smooth), transform 0.32s var(--spring-smooth), filter 0.28s ease;
+    }
+    .panel-hidden {
+      opacity: 0 !important;
+      transform: translateY(12px) scale(0.985) !important;
+      filter: blur(6px) !important;
+      pointer-events: none !important;
+      z-index: 0 !important;
+      visibility: hidden;
+    }
+    .panel-active {
+      opacity: 1 !important;
+      transform: translateY(0) scale(1) !important;
+      filter: blur(0px) !important;
+      pointer-events: auto !important;
+      z-index: 10 !important;
+      visibility: visible;
+    }
+
+    @keyframes tileCascade {
+      0% { opacity: 0; transform: translateY(12px) scale(0.95); filter: blur(3px); }
+      100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+    }
+    .term-tile-anim {
+      animation: tileCascade 0.34s var(--spring-bounce) both;
+      transition: transform 0.25s var(--spring-bounce), background-color 0.22s ease, box-shadow 0.22s ease;
+    }
+
+    .sub-squircle-card {
+      position: relative;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.022);
+      box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+      transition: transform 0.32s var(--spring-bounce), background-color 0.25s ease;
+      overflow: hidden;
+    }
+    .sub-squircle-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(320px circle at var(--mx, -500px) var(--my, -500px), rgba(129, 140, 248, 0.12), transparent 45%);
+      pointer-events: none;
+    }
+    .sub-squircle-card:hover { background: rgba(255, 255, 255, 0.04); }
+
+    .magnetic-btn { transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.2s ease; }
+    .magnetic-btn:active { transform: scale(0.92) !important; }
+
+    .btn-split:hover .scissor-blade-1 { transform: rotate(-14deg); transform-origin: 12px 12px; }
+    .btn-split:hover .scissor-blade-2 { transform: rotate(14deg); transform-origin: 12px 12px; }
+    .scissor-blade-1, .scissor-blade-2 { transition: transform 0.25s var(--spring-bounce); }
+
+    .btn-merge:hover .merge-left { transform: translateX(1.8px); }
+    .btn-merge:hover .merge-right { transform: translateX(-1.8px); }
+    .merge-left, .merge-right { transition: transform 0.25s var(--spring-bounce); }
+
+    .wave-pill {
+      transition: height 0.16s var(--spring-bounce), background-color 0.16s ease, transform 0.16s var(--spring-bounce);
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 5px;
+      background: rgba(255, 255, 255, 0.09);
+      border-radius: 999px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6), 0 0 0 3px var(--accent);
+      cursor: grab;
+      transition: transform 0.2s var(--spring-bounce);
+    }
+    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.18); }
+
+    /* ============================================================
+       3) 调色台：原生取色器做成圆形色盘
+       ============================================================ */
+    input[type="color"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      border-radius: 999px;
+      flex: none;
+    }
+    input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+    input[type="color"]::-webkit-color-swatch {
+      border: 2px solid rgba(255, 255, 255, 0.75);
+      border-radius: 999px;
+      box-shadow: 0 0 16px rgba(255, 255, 255, 0.18);
+    }
+    .swatch-dot {
+      width: 18px; height: 18px; border-radius: 999px; cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.25);
+      transition: transform 0.2s var(--spring-bounce), box-shadow 0.2s ease;
+    }
+    .swatch-dot:hover { transform: scale(1.22); }
+
+    /* ============================================================
+       4) 减少动效（低配机 / 晕动症用户）
+       ============================================================ */
+    body.reduce-motion *,
+    body.reduce-motion *::before,
+    body.reduce-motion *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+    }
+
+    body[dir="rtl"] .writing-vertical { writing-mode: vertical-rl; }
+
+    /* ============================================================
+       5) 亮色主题：修复浅底文字、输入框与卡片对比度
+       ============================================================ */
+    html.light body {
+      background-color: #eceef3;
+      background-image:
+        radial-gradient(circle at 18% 0%, rgba(99, 102, 241, 0.14), transparent 42%),
+        radial-gradient(circle at 85% 100%, rgba(16, 185, 129, 0.08), transparent 45%);
+      color: #18181b;
+    }
+    html.light .glass-surface {
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow:
+        inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+        inset 0 0 0 1px rgba(15, 23, 42, 0.07),
+        0 20px 50px -20px rgba(15, 23, 42, 0.18);
+    }
+    html.light .glass-pill {
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow:
+        inset 0 1px 0 0 rgba(255, 255, 255, 0.8),
+        inset 0 0 0 1px rgba(15, 23, 42, 0.08),
+        0 8px 24px -8px rgba(15, 23, 42, 0.15);
+    }
+    html.light .text-white,
+    html.light .text-zinc-100,
+    html.light .text-zinc-200 { color: #18181b !important; }
+    html.light .text-zinc-300,
+    html.light .text-zinc-400 { color: #52525b !important; }
+    html.light .text-zinc-500 { color: #71717a !important; }
+    html.light .bg-black\/40,
+    html.light .bg-black\/45,
+    html.light .bg-black\/50,
+    html.light .bg-black\/55 { background-color: rgba(15, 23, 42, 0.06) !important; }
+    html.light .bg-white\/\[0\.03\],
+    html.light .bg-white\/\[0\.04\],
+    html.light .bg-white\/\[0\.05\] { background-color: rgba(15, 23, 42, 0.04) !important; }
+    html.light #stage-box,
+    html.light #interactive-canvas { background: #0b0b10 !important; }
+    html.light #floating-sub .text-white,
+    html.light #stage-box .text-white { color: #ffffff !important; }
+    html.light .bg-indigo-500,
+    html.light .bg-gradient-to-r,
+    html.light .bg-gradient-to-tr { color: #ffffff !important; }
+    html.light .sub-squircle-card { background: rgba(15, 23, 42, 0.035); }
+    html.light #sub-active-glider {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.16) 0%, rgba(224, 231, 255, 0.85) 100%);
+    }
+
+    /* ============================================================
+       6) 无边框全屏 / 最大化 / 沉浸式影院舞台全屏（零黑边、零圆角边框）
+       ============================================================ */
+    body.is-maximized {
+      padding: 6px !important;
+      gap: 8px !important;
+    }
+    body.is-maximized #left-pane,
+    body.is-maximized #right-pane,
+    body.is-maximized footer {
+      border-radius: 18px !important;
+    }
+    body.is-maximized #stage-box {
+      border-radius: 14px !important;
+      box-shadow: none !important;
+    }
+
+    body.is-fullscreen {
+      padding: 0 !important;
+      gap: 0 !important;
+      background-color: #050508 !important;
+    }
+    body.is-fullscreen header {
+      padding-left: 12px !important;
+      padding-right: 12px !important;
+      background: rgba(8, 8, 13, 0.92);
+    }
+    body.is-fullscreen #left-pane,
+    body.is-fullscreen #right-pane,
+    body.is-fullscreen footer,
+    body.is-fullscreen #stage-box {
+      border-radius: 0 !important;
+      border: none !important;
+      box-shadow: none !important;
+    }
+    body.is-fullscreen #left-pane {
+      padding: 10px 12px !important;
+    }
+    body.is-fullscreen footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+    }
+
+    /* 右舱收起（舞台全屏）去掉双层嵌套圆角边框 */
+    #left-pane.pane-max #stage-box {
+      border-radius: 12px !important;
+      box-shadow: none !important;
+    }
+
+    /* 沉浸式视频影院全屏：铺满整个物理屏幕，零边框、零圆角、零外边距 */
+    body.is-stage-fullscreen {
+      padding: 0 !important;
+      margin: 0 !important;
+      gap: 0 !important;
+      background: #000000 !important;
+      overflow: hidden !important;
+    }
+    body.is-stage-fullscreen > header,
+    body.is-stage-fullscreen > footer,
+    body.is-stage-fullscreen #right-pane,
+    body.is-stage-fullscreen #split-resizer,
+    body.is-stage-fullscreen #left-collapsed-bar,
+    body.is-stage-fullscreen #right-collapsed-bar,
+    body.is-stage-fullscreen #left-stage-topbar {
+      display: none !important;
+    }
+    body.is-stage-fullscreen #main-workspace {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+    body.is-stage-fullscreen #left-pane {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: none !important;
+      max-height: none !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      border-radius: 0 !important;
+      border: none !important;
+      box-shadow: none !important;
+      background: #000000 !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      z-index: 45 !important;
+    }
+    body.is-stage-fullscreen #stage-box-wrap {
+      padding: 0 !important;
+      margin: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+    }
+    body.is-stage-fullscreen #stage-box {
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: 100vw !important;
+      max-height: 100vh !important;
+      aspect-ratio: auto !important;
+      border-radius: 0 !important;
+      border: none !important;
+      box-shadow: none !important;
+      background: #000000 !important;
+    }
+    body.is-stage-fullscreen #stage-transport-wrap {
+      position: fixed !important;
+      left: 50% !important;
+      bottom: 22px !important;
+      transform: translateX(-50%) !important;
+      z-index: 60 !important;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+    body.is-stage-fullscreen.stage-controls-idle #stage-transport-wrap {
+      opacity: 0 !important;
+      transform: translateX(-50%) translateY(14px) !important;
+      pointer-events: none !important;
+    }
+    body.is-stage-fullscreen.stage-controls-idle #stage-box {
+      cursor: none !important;
+    }
+  </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between p-4 gap-3.5 relative" dir="ltr">
+
+  <input type="file" id="video-upload" accept="video/mp4,video/webm,video/ogg" class="hidden" onchange="loadLocalVideo(event)" />
+  <input type="file" id="srt-upload" accept=".srt,.txt" class="hidden" onchange="loadLocalSrt(event)" />
+
+  <!-- ==================== 顶栏 ==================== -->
+  <header class="h-12 flex items-center justify-between px-1 relative z-40 shrink-0">
+
+    <div class="flex items-center space-x-2.5">
+      <button onclick="triggerPulseWave()" class="magnetic-btn glass-pill pl-2.5 pr-4 py-1.5 rounded-full flex items-center space-x-2.5 group">
+        <div class="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-500 to-violet-400 flex items-center justify-center shadow-[0_0_15px_var(--accent-glow)] group-hover:rotate-90 transition-transform duration-500">
+          <div class="w-2 h-2 rounded-full bg-white"></div>
+        </div>
+        <span class="font-semibold text-[13px] tracking-tight text-white">SubFlow</span>
+      </button>
+
+      <button onclick="openOnboardingModal()" class="magnetic-btn glass-pill px-3 py-1.5 rounded-full text-[11px] text-emerald-300 hover:text-emerald-200 flex items-center space-x-1.5" title="3分钟上手向导与一键10秒双语示例体验">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span>新手引导 / 10秒试跑</span>
+      </button>
+
+      <button onclick="undo()" id="undo-btn" disabled class="magnetic-btn glass-pill px-3.5 py-1.5 rounded-full text-xs text-zinc-300 hover:text-white disabled:opacity-25 disabled:pointer-events-none flex items-center space-x-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 015.5 5.5v0a5.5 5.5 0 01-5.5 5.5H11" />
+        </svg>
+        <span data-i18n="undo">撤销</span>
+      </button>
+    </div>
+
+    <div class="absolute left-1/2 -translate-x-1/2 top-0.5 z-50">
+      <div id="dynamic-island" class="island-morph glass-pill overflow-hidden" style="width: 410px; height: 42px; border-radius: 999px;">
+
+        <div id="island-collapsed" onclick="toggleIsland(true)" class="h-[42px] px-4 flex items-center justify-between cursor-pointer group">
+          <div class="flex items-center space-x-2.5">
+            <div class="w-6 h-6 rounded-full bg-indigo-500/15 flex items-center justify-center space-x-[2px]">
+              <span class="w-[2px] h-2.5 bg-indigo-400 rounded-full animate-pulse"></span>
+              <span class="w-[2px] h-3.5 bg-emerald-400 rounded-full animate-pulse"></span>
+              <span class="w-[2px] h-2 bg-indigo-400 rounded-full animate-pulse"></span>
+            </div>
+            <span id="island-status-label" data-i18n="islandCollapsedHint" class="text-xs text-zinc-200 font-medium group-hover:text-white transition truncate max-w-[185px]">
+              点击导入视频或切换互译语种
+            </span>
+          </div>
+
+          <div class="flex items-center space-x-1.5">
+            <div class="px-2.5 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-400/25 text-[10px] font-mono-num text-indigo-200 flex items-center space-x-1">
+              <span id="pill-src-code">EN</span>
+              <span class="text-indigo-400">→</span>
+              <span id="pill-tgt-code" class="text-emerald-300 font-semibold">ZH</span>
+            </div>
+            <span id="hw-top-pill" class="text-[10px] font-mono-num px-2 py-0.5 rounded-full bg-white/[0.07] text-emerald-300 font-medium">GPU 加速</span>
+          </div>
+        </div>
+
+        <div id="island-expanded" class="hidden p-4 space-y-3 opacity-0 transition-opacity duration-200">
+
+          <div class="flex items-center justify-between bg-black/45 p-1.5 rounded-full border border-white/[0.06]">
+            <button onclick="openLangPicker('source')" id="btn-pick-source" class="flex-1 py-1.5 px-3.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-between text-xs transition">
+              <span class="text-[10px] text-zinc-400" data-i18n="sourceLang">源语言</span>
+              <span id="label-source-lang" class="font-semibold text-white">English 英语</span>
+              <svg class="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M19 9l-7 7-7-7"/></svg>
+            </button>
+
+            <button onclick="swapLanguages()" id="btn-swap-lang" class="mx-2 w-8 h-8 rounded-full bg-indigo-500/20 hover:bg-indigo-500/35 text-indigo-300 flex items-center justify-center transition-transform duration-500 shrink-0" title="一键对调源语言与目标语言">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" transform="rotate(90 12 12)" />
+              </svg>
+            </button>
+
+            <button onclick="openLangPicker('target')" id="btn-pick-target" class="flex-1 py-1.5 px-3.5 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/25 flex items-center justify-between text-xs transition">
+              <span class="text-[10px] text-emerald-300/80" data-i18n="targetLang">译为</span>
+              <span id="label-target-lang" class="font-semibold text-emerald-200">简体中文</span>
+              <svg class="w-3.5 h-3.5 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M19 9l-7 7-7-7"/></svg>
+            </button>
+          </div>
+
+          <div id="lang-grid-drawer" class="hidden bg-black/55 rounded-[22px] p-3 border border-white/[0.07] space-y-2.5">
+            <div class="flex items-center justify-between text-[11px] px-1">
+              <span id="lang-drawer-title" class="text-indigo-300 font-medium">选择原视频语言</span>
+              <div class="flex items-center space-x-2">
+                <button id="btn-auto-detect" onclick="confirmLanguageChoice({code:'auto', short:'AUTO', name:'自动检测', sample:null})" class="px-2.5 py-0.5 rounded-full bg-indigo-500/20 hover:bg-indigo-500/40 border border-indigo-400/30 text-indigo-200 text-[10px] font-medium transition">
+                  ✦ AUTO 自动检测
+                </button>
+                <button onclick="closeLangPicker()" class="px-2 py-0.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-zinc-300 text-[10px]">返回 ▲</button>
+              </div>
+            </div>
+            <div id="lang-grid-box" class="grid grid-cols-4 gap-2 text-xs"></div>
+          </div>
+
+          <div id="island-main-controls" class="space-y-3 transition-opacity duration-200">
+            <div class="flex items-center space-x-2 bg-black/55 p-1.5 pl-4 rounded-full border border-white/[0.07]">
+              <svg class="w-4 h-4 text-zinc-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+              <input id="url-input" type="text" placeholder="粘贴 YouTube / B站 / 抖音 / 本地路径..."
+                class="flex-1 bg-transparent text-xs text-zinc-100 outline-none font-mono-num" oninput="updatePlatformBadge()" oncontextmenu="return true" />
+              <button onclick="pasteUrl()" class="magnetic-btn w-7 h-7 rounded-full bg-white/[0.08] hover:bg-white/[0.18] flex items-center justify-center shrink-0" title="从剪贴板粘贴链接">
+                <svg class="w-3.5 h-3.5 text-zinc-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </button>
+              <button onclick="startAiPipeline()" class="magnetic-btn px-5 py-2 rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-400 hover:to-violet-400 text-white text-xs font-semibold shadow-[0_0_20px_rgba(99,102,241,0.45)] shrink-0">
+                <span data-i18n="startTranslate">提取并翻译</span>
+              </button>
+            </div>
+
+            <!-- 平台识别徽章 -->
+            <div id="platform-badge" class="hidden flex items-center space-x-2 px-1 text-[11px]">
+              <span id="platform-dot" class="w-2 h-2 rounded-full shrink-0" style="background:#9ca3af"></span>
+              <span id="platform-name" class="font-medium text-zinc-200">其他平台</span>
+              <span class="text-zinc-600">·</span>
+              <span id="platform-hint" class="text-zinc-500">粘贴视频页链接即可</span>
+              <button id="platform-bili-login" onclick="biliLogin()" class="hidden ml-auto px-2.5 py-0.5 rounded-full bg-[#fb7299]/20 text-[#fb7299] text-[10px] font-medium">扫码登录</button>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2.5">
+              <button onclick="clickImportVideo()" class="magnetic-btn py-2 px-4 rounded-full bg-white/[0.05] hover:bg-white/[0.1] text-xs text-zinc-200 flex items-center justify-center space-x-2">
+                <svg class="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <rect x="2" y="4" width="20" height="16" rx="5" /><polygon points="10 9 15 12 10 15 10 9" fill="currentColor" />
+                </svg>
+                <span data-i18n="importVideo">导入本地视频</span>
+              </button>
+              <button onclick="clickImportSrt()" class="magnetic-btn py-2 px-4 rounded-full bg-white/[0.05] hover:bg-white/[0.1] text-xs text-zinc-200 flex items-center justify-center space-x-2">
+                <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a4 4 0 01-4-4V7a4 4 0 014-4h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V17a4 4 0 01-4 4z" />
+                </svg>
+                <span data-i18n="importSrt">导入本地字幕</span>
+              </button>
+            </div>
+
+            <button onclick="biliLogin()" class="magnetic-btn w-full py-2 px-4 rounded-full bg-[#fb7299]/15 hover:bg-[#fb7299]/25 border border-[#fb7299]/30 text-[#fb7299] text-xs font-semibold flex items-center justify-center space-x-2" title="手机扫一下即登录，免手动导 cookie">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2M7 8v3m0 0v6m5-6h6v6H9m7-6h4M9 8h4" /></svg>
+              <span>B站扫码登录</span>
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="flex items-center space-x-2.5">
+      <button onclick="openModal('preferences-modal'); switchPrefTab('audio', 3);" class="magnetic-btn glass-pill px-3.5 py-1.5 rounded-full text-emerald-300 text-xs flex items-center space-x-1.5" title="点击调节主音量与声纹微交互音量">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M11 5L6 9H3a1 1 0 00-1 1v4a1 1 0 001 1h3l5 4V5z" />
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15.54 8.46a5 5 0 010 7.07" />
+        </svg>
+        <span id="top-audio-label" class="text-[11px] font-medium">微声效: 18%</span>
+      </button>
+
+      <button id="btn-app-fullscreen" onclick="toggleAppFullscreen()" class="magnetic-btn glass-pill px-3 py-1.5 rounded-full flex items-center space-x-1.5 text-zinc-200 hover:text-white text-xs" title="切换无边框全屏 (F11)">
+        <svg id="app-fs-icon" class="w-3.5 h-3.5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+        </svg>
+        <span id="app-fs-label" class="text-[11px] font-medium">全屏</span>
+      </button>
+
+      <button onclick="openModal('preferences-modal')" class="magnetic-btn glass-pill px-4 py-1.5 rounded-full flex items-center space-x-2 text-zinc-200 hover:text-white group text-xs">
+        <svg class="w-4 h-4 text-indigo-400 group-hover:rotate-90 transition-transform duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3" />
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+        </svg>
+        <span data-i18n="preferences">偏好设置</span>
+      </button>
+
+      <button onclick="translateExisting()" id="translate-subs-btn" class="magnetic-btn px-4 py-1.5 rounded-full bg-indigo-500/25 hover:bg-indigo-500/40 border border-indigo-400/40 text-indigo-100 font-semibold text-xs flex items-center space-x-1.5" title="把当前字幕翻译成中文（无需重新下载识别）">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+        </svg>
+        <span>翻译字幕</span>
+      </button>
+
+      <button onclick="openModal('export-modal')" class="magnetic-btn px-4 py-1.5 rounded-full bg-white hover:bg-zinc-100 text-zinc-950 font-semibold text-xs flex items-center space-x-1.5 shadow-[0_0_25px_rgba(255,255,255,0.2)]">
+        <span data-i18n="exportBtn">导出成片</span>
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7 17L17 7M17 7H8M17 7v9" />
+        </svg>
+      </button>
+    </div>
+
+  </header>
+
+  <!-- ==================== 主工作区 ==================== -->
+  <main id="main-workspace" class="flex-1 flex items-stretch min-h-0 relative">
+
+    <div id="left-collapsed-bar" onclick="Split.restore()" title="点击展开左侧视觉舞台"
+      class="rail-shell rail-off w-12 mr-2 glass-surface rounded-full flex flex-col items-center justify-between py-6 cursor-pointer hover:bg-white/[0.06] group shrink-0">
+      <div class="w-7 h-7 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center group-hover:scale-110 transition">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+      </div>
+      <div class="writing-vertical text-xs font-medium text-zinc-400 group-hover:text-white tracking-widest whitespace-nowrap">展开左侧视觉舞台</div>
+      <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+    </div>
+
+    <section id="left-pane" class="pane-shell glass-surface rounded-[32px] flex flex-col justify-between p-5 relative overflow-hidden min-w-0 shrink-0" style="width: 58%;">
+
+      <div id="left-stage-topbar" class="flex items-center justify-between z-20 shrink-0">
+        <div class="relative flex items-center bg-black/45 p-1 rounded-full border border-white/[0.05] text-xs">
+          <div id="vis-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[96px] rounded-full bg-white/[0.14] shadow-sm pointer-events-none"></div>
+          <button onclick="switchVisualizer('particles', 0)" id="vis-btn-0" data-i18n="visParticles" class="relative z-10 w-[96px] py-1 rounded-full text-white font-medium transition">星尘引力</button>
+          <button onclick="switchVisualizer('strings', 1)" id="vis-btn-1" data-i18n="visStrings" class="relative z-10 w-[96px] py-1 rounded-full text-zinc-400 hover:text-zinc-200 transition">零延迟琴弦</button>
+          <button onclick="switchVisualizer('canbus', 2)" id="vis-btn-2" data-i18n="visCanbus" class="relative z-10 w-[96px] py-1 rounded-full text-zinc-400 hover:text-zinc-200 transition">双线差分波</button>
+        </div>
+
+        <div id="vis-hint-pill" class="px-3 py-1 rounded-full bg-white/[0.04] text-[11px] text-zinc-400 font-mono-num truncate ml-2">
+          引力场已就绪 · 拖动中间分界可双向缩放界面
+        </div>
+      </div>
+
+      <div id="stage-box-wrap" class="flex-1 min-h-0 flex items-center justify-center relative py-3">
+        <div id="stage-box" ondblclick="toggleStageFullscreen()" class="w-full h-full max-w-full max-h-full aspect-video bg-[#040406] rounded-[26px] relative overflow-hidden shadow-[0_25px_70px_rgba(0,0,0,0.9),inset_0_0_0_1px_rgba(255,255,255,0.07)] cursor-crosshair mx-auto">
+
+          <video id="real-video" preload="auto" playsinline class="hidden w-full h-full object-contain bg-black" style="transform: translateZ(0); backface-visibility: hidden;"></video>
+          <canvas id="interactive-canvas" width="760" height="428" class="w-full h-full block"></canvas>
+
+          <div id="floating-sub"
+            onmousedown="startFreeSubDrag(event)"
+            class="absolute left-1/2 -translate-x-1/2 cursor-grab active:cursor-grabbing z-30 select-none transition-transform duration-75"
+            style="bottom: 11%; opacity: 0; will-change: opacity, transform;">
+            <div id="sub-backdrop" class="px-6 py-2.5 rounded-[22px] text-center shadow-2xl transition-all duration-200" style="background: rgba(12, 12, 18, 0.72); backdrop-filter: blur(12px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 12px 30px rgba(0,0,0,0.6);">
+              <!-- 第 1 位说话人 -->
+              <div id="sub-row-1" class="flex items-stretch justify-center gap-2.5">
+                <span id="spk-bar-1" class="hidden w-[3px] rounded-full shrink-0 transition-colors duration-200" style="background:#fcd34d;"></span>
+                <div id="sub-row-1-text" class="min-w-0 flex flex-col">
+                  <div id="stage-zh" class="font-bold tracking-wide leading-snug transition-all duration-150" style="font-size: 19px; color: #fcd34d; text-shadow: 0 2px 10px rgba(0,0,0,0.9), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;"></div>
+                  <div id="stage-src" class="leading-tight mt-1 font-medium transition-all duration-150" style="font-size: 12px; color: #d4d4d8; text-shadow: 0 2px 8px rgba(0,0,0,0.9);"></div>
+                </div>
+              </div>
+
+              <!-- 分隔线 -->
+              <div id="sub-divider" class="hidden my-1.5 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent"></div>
+
+              <!-- 第 2 位说话人（双人对话时出现） -->
+              <div id="sub-row-2" class="hidden items-stretch justify-center gap-2.5">
+                <span id="spk-bar-2" class="w-[3px] rounded-full shrink-0 transition-colors duration-200" style="background:#7dd3fc;"></span>
+                <div id="sub-row-2-text" class="min-w-0 flex flex-col">
+                  <div id="stage-zh-2" class="font-bold tracking-wide leading-snug transition-all duration-150" style="font-size: 16px; color: #7dd3fc; text-shadow: 0 2px 10px rgba(0,0,0,0.9), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;"></div>
+                  <div id="stage-src-2" class="leading-tight mt-1 font-medium transition-all duration-150" style="font-size: 11px; color: #cbd5e1; text-shadow: 0 2px 8px rgba(0,0,0,0.9);"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div id="stage-transport-wrap" class="flex justify-center z-20 shrink-0">
+        <div class="glass-pill rounded-full px-3 py-1.5 flex items-center space-x-5">
+
+          <div class="px-3.5 py-1.5 rounded-full bg-black/40 font-mono-num text-xs flex items-center space-x-1.5">
+            <span id="time-now" class="text-white font-semibold">00:05.20</span>
+            <span class="text-zinc-600">/</span>
+            <span id="time-total" class="text-zinc-400">00:24.00</span>
+          </div>
+
+          <div class="flex items-center space-x-1.5">
+            <button onclick="stepSub(-1)" class="magnetic-btn w-9 h-9 rounded-full hover:bg-white/[0.08] flex items-center justify-center text-zinc-300 hover:text-white" title="上一句 (↑)">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" /></svg>
+            </button>
+
+            <button onclick="togglePlay()" id="play-btn" class="magnetic-btn w-11 h-11 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-500 hover:from-indigo-500 hover:to-violet-400 text-white flex items-center justify-center shadow-[0_0_25px_var(--accent-glow)]" title="播放/暂停 (Space)">
+              <svg id="play-svg" class="w-5 h-5 translate-x-[1px]" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5.14v14l11-7-11-7z" /></svg>
+            </button>
+
+            <button onclick="stepSub(1)" class="magnetic-btn w-9 h-9 rounded-full hover:bg-white/[0.08] flex items-center justify-center text-zinc-300 hover:text-white" title="下一句 (↓)">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg>
+            </button>
+          </div>
+
+          <div class="flex items-center bg-black/40 p-1 rounded-full space-x-1">
+            <button onclick="splitCurrentSub()" class="magnetic-btn btn-split px-3.5 py-1.5 rounded-full hover:bg-white/[0.1] text-xs text-zinc-200 hover:text-white flex items-center space-x-1.5" title="拆分当前句 (S)">
+              <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
+                <line class="scissor-blade-1" x1="20" y1="4" x2="8.12" y2="15.88" stroke-linecap="round" />
+                <line class="scissor-blade-2" x1="14.47" y1="14.48" x2="20" y2="20" stroke-linecap="round" />
+              </svg>
+              <span class="font-medium" data-i18n="splitBtn">拆分</span>
+            </button>
+            <div class="w-[1px] h-3.5 bg-white/10"></div>
+            <button onclick="mergeCurrentSub()" class="magnetic-btn btn-merge px-3.5 py-1.5 rounded-full hover:bg-white/[0.1] text-xs text-zinc-200 hover:text-white flex items-center space-x-1.5" title="向下合并 (M)">
+              <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path class="merge-left" stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a3 3 0 00-3 3v4a3 3 0 003 3h3" />
+                <path class="merge-right" stroke-linecap="round" stroke-linejoin="round" d="M16 7h3a3 3 0 013 3v4a3 3 0 01-3 3h-3" />
+                <line x1="8" y1="12" x2="16" y2="12" stroke-linecap="round" />
+              </svg>
+              <span class="font-medium" data-i18n="mergeBtn">合并</span>
+            </button>
+            <div class="w-[1px] h-3.5 bg-white/10"></div>
+            <button id="btn-stage-fullscreen" onclick="toggleStageFullscreen()" class="magnetic-btn w-8 h-8 rounded-full hover:bg-white/[0.1] flex items-center justify-center text-zinc-300 hover:text-white" title="沉浸式无边框视频全屏（双击画面 / Esc 退出）">
+              <svg id="stage-fs-icon" class="w-3.5 h-3.5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+              </svg>
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+
+    <!-- 双向推拉杆 -->
+    <div id="split-resizer"
+      onmousedown="Split.startDrag(event)"
+      ondblclick="Split.restore()"
+      title="左右拖动推拉两边大小 · 双击恢复黄金比例"
+      class="w-5 shrink-0 flex flex-col items-center justify-center relative z-30 cursor-col-resize group select-none">
+
+      <div id="split-ratio-hud" class="opacity-0 group-hover:opacity-100 pointer-events-none absolute top-4 px-2.5 py-1 rounded-full glass-pill text-[10px] font-mono-num text-indigo-300 whitespace-nowrap transition-opacity duration-200 shadow-lg">
+        58% : 42%
+      </div>
+
+      <div id="resizer-glow-line" class="w-[2px] flex-1 my-3 rounded-full bg-white/[0.04] group-hover:bg-indigo-500/45 transition-colors duration-300"></div>
+
+      <div class="my-1 py-1.5 px-1 rounded-full glass-pill border border-white/10 group-hover:border-indigo-400/50 flex flex-col items-center space-y-2 shadow-[0_0_25px_rgba(0,0,0,0.8)] transition-all duration-300 group-hover:scale-105">
+
+        <button onmousedown="event.stopPropagation();" onclick="event.stopPropagation(); Split.nudge('left')" title="向左推到底" class="w-5 h-5 rounded-full hover:bg-indigo-500/30 text-zinc-400 hover:text-white flex items-center justify-center transition">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+
+        <div class="flex flex-col space-y-1 py-1">
+          <span class="w-1 h-1 rounded-full bg-zinc-400 group-hover:bg-indigo-400 transition-colors"></span>
+          <span class="w-1 h-2.5 rounded-full bg-indigo-400 shadow-[0_0_8px_#818cf8]"></span>
+          <span class="w-1 h-1 rounded-full bg-zinc-400 group-hover:bg-indigo-400 transition-colors"></span>
+        </div>
+
+        <button onmousedown="event.stopPropagation();" onclick="event.stopPropagation(); Split.nudge('right')" title="向右推到底" class="w-5 h-5 rounded-full hover:bg-indigo-500/30 text-zinc-400 hover:text-white flex items-center justify-center transition">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+        </button>
+
+      </div>
+
+      <div id="resizer-glow-line-bottom" class="w-[2px] flex-1 my-3 rounded-full bg-white/[0.04] group-hover:bg-indigo-500/45 transition-colors duration-300"></div>
+    </div>
+
+    <!-- 右舱 -->
+    <section id="right-pane" class="pane-shell flex-1 min-w-0 glass-surface rounded-[32px] flex flex-col overflow-hidden p-4">
+
+      <div class="relative bg-black/45 p-1.5 rounded-full grid grid-cols-3 text-xs shrink-0 mb-3 shadow-inner border border-white/[0.04]">
+        <div id="tab-glider" class="glider-pill absolute top-1.5 bottom-1.5 left-1.5 w-[calc(33.333%-4px)] rounded-full bg-gradient-to-b from-white/[0.15] to-white/[0.07] shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_4px_14px_rgba(0,0,0,0.5)] pointer-events-none"></div>
+
+        <button onclick="switchRightPanel('subs', 0)" id="tab-btn-0" class="relative z-10 py-2 rounded-full text-white font-semibold flex items-center justify-center space-x-1.5 transition-colors">
+          <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h10M4 18h14" /></svg>
+          <span data-i18n="tabSubs">双语字幕流</span>
+        </button>
+
+        <button onclick="switchRightPanel('pad', 1)" id="tab-btn-1" class="relative z-10 py-2 rounded-full text-zinc-400 hover:text-zinc-200 font-medium flex items-center justify-center space-x-1.5 transition-colors">
+          <svg class="w-3.5 h-3.5 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3" /></svg>
+          <span data-i18n="tabStyle">触控造型台</span>
+        </button>
+
+        <button onclick="switchRightPanel('terms', 2)" id="tab-btn-2" class="relative z-10 py-2 rounded-full text-zinc-400 hover:text-zinc-200 font-medium flex items-center justify-center space-x-1.5 transition-colors">
+          <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="4" /><path stroke-linecap="round" d="M7 11V7a5 5 0 0110 0v4" /></svg>
+          <span data-i18n="tabTerms">术语魔方</span>
+          <span id="active-term-count" class="text-[10px] font-mono-num text-emerald-400">(36库)</span>
+        </button>
+      </div>
+
+      <div class="relative flex-1 overflow-hidden">
+
+        <div id="panel-subs" onmousemove="updateCardSpotlight(event)" class="panel-view panel-active overflow-y-auto px-1 py-1">
+          <div class="flex items-center justify-between gap-2 px-1.5 pb-2 text-[11px]">
+            <div class="flex items-center space-x-1.5">
+              <button id="dual-speaker-btn" onclick="toggleDualSpeakerMode()" class="px-2.5 py-1 rounded-full bg-indigo-500/25 border border-indigo-400/40 text-indigo-200 text-[10px] font-semibold transition" title="默认智能双人模式（翻译时自动识别对话换人 A/B）；点击可切换为单人模式">
+                说话人：双人模式 (A/B)
+              </button>
+              <button id="retry-failed-btn" onclick="retryFailedTranslations()" class="hidden px-2.5 py-1 rounded-full bg-rose-500/20 hover:bg-rose-500/35 text-rose-200 text-[10px] font-semibold transition">
+                补翻失败条目
+              </button>
+            </div>
+            <button onclick="exportAlignmentCsv()" class="px-2.5 py-1 rounded-full bg-white/[0.05] hover:bg-white/[0.12] text-zinc-400 hover:text-zinc-200 text-[10px] transition" title="导出 CSV/JSON 时间轴核对表">
+              导出时间轴表
+            </button>
+          </div>
+          <div class="relative">
+            <div id="sub-active-glider" class="absolute left-0 right-0 rounded-[22px] pointer-events-none z-0" style="top: 0px; height: 112px; transform: translateY(120px); opacity: 0;">
+              <div class="absolute left-1.5 top-4 bottom-4 w-1 rounded-full bg-indigo-400 shadow-[0_0_12px_#818cf8]"></div>
+            </div>
+            <div id="sub-cards-wrapper" class="relative z-10 space-y-2.5"></div>
+          </div>
+        </div>
+
+        <!-- 触控造型台 -->
+        <div id="panel-pad" class="panel-view panel-hidden overflow-y-auto px-1 py-1 space-y-2.5 text-xs">
+
+          <div class="bg-white/[0.025] rounded-[22px] p-3 space-y-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+            <div class="flex items-center justify-between text-[11px] px-1">
+              <span class="text-zinc-300 font-medium">一键行业字幕视觉预设</span>
+              <span id="preset-tag-label" class="text-indigo-400 font-mono-num">当前：B站硬核科普</span>
+            </div>
+            <div class="relative bg-black/50 p-1 rounded-full grid grid-cols-4 border border-white/[0.05] text-[11px]">
+              <div id="preset-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[calc(25%-2px)] rounded-full bg-indigo-500 shadow-[0_0_12px_rgba(99,102,241,0.5)] pointer-events-none"></div>
+              <button onclick="applyStylePreset('bili', 0)" id="preset-0" class="relative z-10 py-1.5 rounded-full text-white font-semibold transition">B站科普</button>
+              <button onclick="applyStylePreset('netflix', 1)" id="preset-1" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">Netflix</button>
+              <button onclick="applyStylePreset('apple', 2)" id="preset-2" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">Apple极简</button>
+              <button onclick="applyStylePreset('cyber', 3)" id="preset-3" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">赛博霓虹</button>
+            </div>
+          </div>
+
+          <div class="bg-white/[0.025] rounded-[22px] p-3.5 space-y-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+            <div class="flex items-center justify-between text-zinc-400">
+              <span class="font-medium text-zinc-200" data-i18n="xyPadTitle">二维磁吸触控垫 (拖动光球实时塑形)</span>
+              <span id="xy-readout" class="font-mono-num px-2.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 text-[11px]">X: 72% 底框 · Y: 11% 边距</span>
+            </div>
+            <div id="xy-pad" onmousedown="startXYPadDrag(event)" class="w-full h-36 rounded-[18px] bg-[#050508] relative overflow-hidden cursor-pointer shadow-inner border border-white/[0.06]" style="background-size: 20px 20px; background-image: radial-gradient(rgba(255,255,255,0.12) 1px, transparent 1px);">
+              <div class="absolute inset-0 opacity-15 pointer-events-none" style="background: linear-gradient(45deg, transparent 49.5%, rgba(99,102,241,0.4) 50%, transparent 50.5%);"></div>
+              <div id="xy-line-x" class="absolute top-0 bottom-0 w-[1px] bg-indigo-500/35 pointer-events-none" style="left: 72%;"></div>
+              <div id="xy-line-y" class="absolute left-0 right-0 h-[1px] bg-indigo-500/35 pointer-events-none" style="bottom: 24%;"></div>
+              <div id="xy-puck" class="w-6 h-6 rounded-full bg-indigo-500 border-2 border-white shadow-[0_0_25px_#6366f1] -ml-3 -mb-3 absolute pointer-events-none transition-transform duration-75" style="left: 72%; bottom: 24%;"></div>
+              <div class="absolute bottom-2 left-3 text-[10px] text-zinc-500 pointer-events-none">X：底框不透明度 (0~95%)</div>
+              <div class="absolute top-2 left-3 text-[10px] text-zinc-500 pointer-events-none">Y：画面垂直高度 (3~45%)</div>
+            </div>
+          </div>
+
+          <!-- ===== 调色台（替换原来的 6 个固定色块） ===== -->
+          <div class="bg-white/[0.025] rounded-[22px] p-3.5 space-y-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+            <div class="flex items-center justify-between">
+              <span class="font-medium text-zinc-200" data-i18n="colorLab">调色台</span>
+              <span class="text-[10px] text-zinc-500">点色盘取任意色 · 或直接填 HEX</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div class="space-y-2">
+                <div class="flex items-center justify-between text-[11px]">
+                  <span class="text-zinc-400">主字幕（译文）</span>
+                  <span id="hex-zh-label" class="font-mono-num text-zinc-500">#FCD34D</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                  <input type="color" id="pick-zh" value="#fcd34d" oninput="setSubColor(this.value, 'zh')">
+                  <input id="hex-zh" type="text" maxlength="7" value="#FCD34D" onchange="setSubColor(this.value, 'zh')"
+                    class="flex-1 min-w-0 bg-black/50 border border-white/10 rounded-full px-3 py-1.5 font-mono-num text-[11px] text-zinc-200 outline-none focus:border-indigo-500" />
+                </div>
+                <div id="preset-zh" class="flex flex-wrap gap-1.5 pt-0.5"></div>
+              </div>
+
+              <div class="space-y-2">
+                <div class="flex items-center justify-between text-[11px]">
+                  <span class="text-zinc-400">原文（外文）</span>
+                  <span id="hex-src-label" class="font-mono-num text-zinc-500">#D4D4D8</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                  <input type="color" id="pick-src" value="#d4d4d8" oninput="setSubColor(this.value, 'src')">
+                  <input id="hex-src" type="text" maxlength="7" value="#D4D4D8" onchange="setSubColor(this.value, 'src')"
+                    class="flex-1 min-w-0 bg-black/50 border border-white/10 rounded-full px-3 py-1.5 font-mono-num text-[11px] text-zinc-200 outline-none focus:border-emerald-500" />
+                </div>
+                <div id="preset-src" class="flex flex-wrap gap-1.5 pt-0.5"></div>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between text-[10px] text-zinc-500 pt-1 border-t border-white/[0.05]">
+              <span>底框不透明度 <span id="bg-op-val" class="font-mono-num text-indigo-300">72%</span></span>
+              <button onclick="resetColors()" class="px-2.5 py-0.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-zinc-300">恢复默认色</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2.5">
+            <div class="bg-white/[0.025] rounded-[20px] p-3 space-y-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+              <div class="flex justify-between text-zinc-400">
+                <span data-i18n="fontSize">主字幕字号</span>
+                <span id="font-size-val" class="font-mono-num text-white font-semibold">19 px</span>
+              </div>
+              <input id="slider-zh-size" type="range" min="14" max="28" value="19" oninput="changeFontSize(this.value)" class="w-full" />
+            </div>
+
+            <div class="bg-white/[0.025] rounded-[20px] p-3 space-y-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+              <div class="flex justify-between text-zinc-400">
+                <span>副字幕字号</span>
+                <span id="src-size-val" class="font-mono-num text-white font-semibold">12 px</span>
+              </div>
+              <input id="slider-src-size" type="range" min="10" max="18" value="12" oninput="changeSrcFontSize(this.value)" class="w-full" />
+            </div>
+
+            <div class="bg-white/[0.025] rounded-[20px] p-3 space-y-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+              <div class="flex justify-between text-zinc-400">
+                <span>底框毛玻璃模糊度</span>
+                <span id="blur-val" class="font-mono-num text-indigo-300 font-semibold">12 px</span>
+              </div>
+              <input id="slider-blur" type="range" min="0" max="24" value="12" oninput="changeBackdropBlur(this.value)" class="w-full" />
+            </div>
+
+            <div class="bg-white/[0.025] rounded-[20px] p-3 space-y-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+              <div class="flex justify-between text-zinc-400">
+                <span>光学描边立体度</span>
+                <span id="stroke-val" class="font-mono-num text-emerald-300 font-semibold">75%</span>
+              </div>
+              <input id="slider-stroke" type="range" min="0" max="100" value="75" oninput="changeStrokeDepth(this.value)" class="w-full" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2.5">
+            <div class="bg-white/[0.025] rounded-[20px] p-3 space-y-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+              <span class="text-zinc-400 block text-[11px]" data-i18n="bilingualOrder">双语上下排布</span>
+              <div class="relative grid grid-cols-2 bg-black/45 p-1 rounded-full">
+                <div id="order-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-indigo-500 pointer-events-none"></div>
+                <button onclick="setOrder('zh_top', 0)" id="ord-zh" class="relative z-10 py-1 rounded-full text-white font-medium text-[11px] transition">译文在上</button>
+                <button onclick="setOrder('en_top', 1)" id="ord-en" class="relative z-10 py-1 rounded-full text-zinc-400 hover:text-white text-[11px] transition">原文在上</button>
+              </div>
+            </div>
+
+            <div class="bg-white/[0.025] rounded-[20px] p-3 space-y-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+              <span class="text-zinc-400 block text-[11px]">字幕渲染字体</span>
+              <div class="relative grid grid-cols-2 bg-black/45 p-1 rounded-full">
+                <div id="font-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-violet-500 pointer-events-none"></div>
+                <button onclick="setFontFamily('sans', 0)" id="fnt-0" class="relative z-10 py-1 rounded-full text-white font-medium text-[11px] transition">现代黑体</button>
+                <button onclick="setFontFamily('mono', 1)" id="fnt-1" class="relative z-10 py-1 rounded-full text-zinc-400 hover:text-white text-[11px] transition">工科等宽</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 术语魔方 -->
+        <div id="panel-terms" class="panel-view panel-hidden flex flex-col justify-between space-y-2.5 text-xs overflow-hidden px-1 py-1">
+
+          <div class="space-y-2 shrink-0">
+            <div class="flex items-center justify-between px-1">
+              <div class="flex items-center space-x-1.5">
+                <span class="text-[11px] text-zinc-400">术语锁定：</span>
+                <button onclick="toggleTermLock(this)" id="term-lock-btn-2" class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-medium">已开启</button>
+              </div>
+              <span class="text-[10px] text-zinc-500">关掉后译文更自然，不套术语</span>
+            </div>
+
+            <div class="flex items-center justify-between px-1">
+              <div class="flex items-center space-x-1.5">
+                <span class="text-[11px] text-zinc-400">当前行业库：</span>
+                <span id="current-ind-badge" class="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-semibold text-[11px]">01. 汽车电控与CAN</span>
+              </div>
+              <button onclick="toggleIndustryMatrixDrawer()" id="btn-all-36" class="px-3 py-1 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium transition flex items-center space-x-1">
+                <span>❖ 浏览全部 36 个行业库</span>
+              </button>
+            </div>
+
+            <div class="relative bg-black/50 p-1 rounded-full grid grid-cols-6 border border-white/[0.05] text-[11px]">
+              <div id="sector-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[calc(16.666%-2px)] rounded-full bg-indigo-500 shadow-[0_0_12px_rgba(99,102,241,0.5)] pointer-events-none"></div>
+              <button onclick="switchMacroSector(0)" id="sec-0" class="relative z-10 py-1 rounded-full text-white font-semibold transition truncate">汽车工程</button>
+              <button onclick="switchMacroSector(1)" id="sec-1" class="relative z-10 py-1 rounded-full text-zinc-400 hover:text-white transition truncate">AI与软件</button>
+              <button onclick="switchMacroSector(2)" id="sec-2" class="relative z-10 py-1 rounded-full text-zinc-400 hover:text-white transition truncate">机械智造</button>
+              <button onclick="switchMacroSector(3)" id="sec-3" class="relative z-10 py-1 rounded-full text-zinc-400 hover:text-white transition truncate">半导体芯</button>
+              <button onclick="switchMacroSector(4)" id="sec-4" class="relative z-10 py-1 rounded-full text-zinc-400 hover:text-white transition truncate">影视视效</button>
+              <button onclick="switchMacroSector(5)" id="sec-5" class="relative z-10 py-1 rounded-full text-zinc-400 hover:text-white transition truncate">前沿交叉</button>
+            </div>
+
+            <div class="relative bg-white/[0.02] p-1 rounded-2xl grid grid-cols-3 gap-1 border border-white/[0.04] text-[10px]" id="sub-industry-bar"></div>
+          </div>
+
+          <div id="industry-36-drawer" class="hidden flex-1 overflow-y-auto bg-black/70 rounded-[22px] p-3 border border-indigo-500/30 space-y-2">
+            <div class="flex items-center justify-between px-1">
+              <span class="text-indigo-300 font-semibold text-xs">36 个垂直行业专业术语库全景矩阵 (点击任一行业立即挂载 24 词)</span>
+              <button onclick="toggleIndustryMatrixDrawer()" class="text-zinc-400 hover:text-white">收起 ✕</button>
+            </div>
+            <div id="industry-36-grid" class="grid grid-cols-3 gap-1.5 text-[11px]"></div>
+          </div>
+
+          <div id="term-input-row" class="flex items-center space-x-1.5 bg-black/45 p-1.5 rounded-full border border-white/[0.06] shrink-0">
+            <input id="term-src-in" type="text" placeholder="原词 (如 Powertrain)" class="w-28 bg-transparent px-2.5 py-1 text-zinc-100 outline-none font-mono-num text-[11px]" />
+            <div class="w-[1px] h-3.5 bg-white/10"></div>
+            <input id="term-zh-in" type="text" placeholder="锁定译名 (如 动力总成)" class="flex-1 bg-transparent px-2 py-1 text-zinc-100 outline-none text-[11px]" />
+            <button onclick="addTermTile()" class="magnetic-btn px-3 py-1 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white font-semibold shrink-0 text-[11px]">+ 加入本库</button>
+            <button onclick="toggleAllCurrentCategory()" class="px-2.5 py-1 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-zinc-300 shrink-0 text-[10px]">全选</button>
+          </div>
+
+          <div id="term-tiles-box" class="flex-1 overflow-y-auto grid grid-cols-2 gap-2 pr-1 content-start"></div>
+        </div>
+
+      </div>
+
+    </section>
+
+    <div id="right-collapsed-bar" onclick="Split.restore()" title="点击展开右侧工作台"
+      class="rail-shell rail-off w-12 ml-2 glass-surface rounded-full flex flex-col items-center justify-between py-6 cursor-pointer hover:bg-white/[0.06] group shrink-0">
+      <div class="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center group-hover:scale-110 transition">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+      </div>
+      <div class="writing-vertical text-xs font-medium text-zinc-400 group-hover:text-white tracking-widest whitespace-nowrap">展开双语字幕与术语台</div>
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+    </div>
+
+  </main>
+
+  <!-- ==================== 底部时间轴 ==================== -->
+  <footer class="h-[110px] glass-surface rounded-[30px] px-5 py-3 flex flex-col justify-between relative overflow-hidden shrink-0">
+
+    <div class="flex items-center justify-between text-[11px] text-zinc-400 z-20">
+      <div class="flex items-center space-x-2.5">
+        <span class="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_8px_#818cf8]"></span>
+        <span class="text-zinc-200 font-medium" data-i18n="timelineTitle">流体惯性声纹时间轴</span>
+        <span class="text-zinc-500" data-i18n="timelineHint">点击或搓动轨道体验弹簧阻尼滑行指针 · 划过声纹触发 18% 柔音泛音</span>
+      </div>
+      <button onclick="addNewSegment()" class="magnetic-btn px-3 py-1 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-zinc-200 font-medium transition">
+        <span data-i18n="insertSeg">+ 插入新字幕段</span>
+      </button>
+    </div>
+
+    <div id="timeline-capsules" onmousedown="startTimelineScrub(event)" class="h-8 relative bg-black/45 rounded-full p-1 overflow-hidden cursor-ew-resize border border-white/[0.04] z-10"></div>
+    <div id="interactive-waveform" class="h-6 flex items-end justify-between gap-[4px] px-2 select-none z-10"></div>
+
+    <div id="fluid-playhead" class="absolute top-1.5 bottom-1.5 pointer-events-none z-30" style="left: 22%; transform: translateX(-50%);">
+      <div class="absolute -left-8 -right-8 top-4 bottom-0 bg-gradient-to-b from-indigo-500/18 via-rose-500/10 to-transparent blur-md rounded-full"></div>
+      <div id="playhead-badge" class="px-2 py-0.5 rounded-full bg-gradient-to-r from-rose-500 to-indigo-500 text-white font-mono-num text-[9px] font-bold shadow-[0_4px_12px_rgba(244,63,94,0.5)] whitespace-nowrap -translate-y-0.5 border border-white/25">05.20s</div>
+      <div id="playhead-needle" class="mx-auto w-[2px] h-[78px] rounded-full bg-gradient-to-b from-white via-rose-400 to-indigo-500 shadow-[0_0_12px_#f43f5e] origin-top transition-transform duration-75"></div>
+    </div>
+
+  </footer>
+
+  <!-- ==================== 偏好设置（5 个分页） ==================== -->
+  <div id="preferences-modal" onclick="if(event.target===this) closeModal('preferences-modal')" class="hidden fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50">
+    <div class="glass-surface rounded-[34px] w-full max-w-3xl h-[560px] flex overflow-hidden text-xs shadow-2xl">
+
+      <aside class="w-52 bg-black/40 border-r border-white/[0.06] p-4 flex flex-col justify-between shrink-0">
+        <div class="space-y-4">
+          <div class="px-2 pt-1">
+            <div class="text-sm font-bold text-white" data-i18n="prefHeader">偏好设置</div>
+            <div class="text-[11px] text-zinc-500 mt-0.5">SubFlow Studio V9.2</div>
+          </div>
+
+          <div class="relative space-y-1">
+            <div id="pref-nav-glider" class="glider-pill absolute left-0 right-0 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 pointer-events-none" style="transform: translateY(0px);"></div>
+
+            <button onclick="switchPrefTab('general', 0)" id="pnav-0" class="relative z-10 w-full h-10 px-3.5 rounded-2xl text-white font-semibold flex items-center space-x-2.5 transition">
+              <svg class="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span>通用与界面语言</span>
+            </button>
+
+            <button onclick="switchPrefTab('engine', 1)" id="pnav-1" class="relative z-10 w-full h-10 px-3.5 rounded-2xl text-zinc-400 hover:text-zinc-200 font-medium flex items-center space-x-2.5 transition">
+              <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>
+              <span>算力与翻译引擎</span>
+            </button>
+
+            <button onclick="switchPrefTab('render', 2)" id="pnav-2" class="relative z-10 w-full h-10 px-3.5 rounded-2xl text-zinc-400 hover:text-zinc-200 font-medium flex items-center space-x-2.5 transition">
+              <svg class="w-4 h-4 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+              <span>渲染清晰度与导出</span>
+            </button>
+
+            <button onclick="switchPrefTab('audio', 3)" id="pnav-3" class="relative z-10 w-full h-10 px-3.5 rounded-2xl text-zinc-400 hover:text-zinc-200 font-medium flex items-center space-x-2.5 transition">
+              <svg class="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+              <span>分层声效与外观</span>
+            </button>
+
+            <button onclick="switchPrefTab('shortcuts', 4)" id="pnav-4" class="relative z-10 w-full h-10 px-3.5 rounded-2xl text-zinc-400 hover:text-zinc-200 font-medium flex items-center space-x-2.5 transition">
+              <svg class="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 13h6"/></svg>
+              <span>快捷键与存储</span>
+            </button>
+
+            <button onclick="switchPrefTab('about', 5)" id="pnav-5" class="relative z-10 w-full h-10 px-3.5 rounded-2xl text-zinc-400 hover:text-zinc-200 font-medium flex items-center space-x-2.5 transition">
+              <svg class="w-4 h-4 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+              <span>关于与更新</span>
+            </button>
+          </div>
+        </div>
+
+        <button onclick="closeModal('preferences-modal')" class="magnetic-btn w-full py-2.5 rounded-full bg-white text-zinc-950 font-semibold text-center shadow">保存并关闭</button>
+      </aside>
+
+      <div class="flex-1 relative overflow-hidden">
+
+        <!-- 通用 -->
+        <div id="pref-page-general" class="panel-view panel-active overflow-y-auto p-6 space-y-4">
+          <div>
+            <h3 class="text-sm font-bold text-white">通用与界面语言 (General & Localization)</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">界面语言已扩容到 12 种；工作区、代理与启动行为都在这里</p>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2.5 border border-white/[0.05]">
+            <div class="flex justify-between items-center">
+              <span class="font-semibold text-zinc-200">界面文字语言 (12 Languages)</span>
+              <span id="ui-lang-label" class="text-[11px] text-indigo-400">简体中文</span>
+            </div>
+            <div id="ui-lang-grid" class="grid grid-cols-4 gap-1.5"></div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2 border border-white/[0.05]">
+              <span class="font-semibold text-zinc-200 block">界面缩放</span>
+              <div class="relative bg-black/50 p-1 rounded-full grid grid-cols-3 border border-white/[0.05]">
+                <div id="zoom-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[calc(33.333%-2px)] rounded-full bg-indigo-500 pointer-events-none"></div>
+                <button onclick="setUiZoom(90, 0)" id="zoom-0" class="relative z-10 py-1.5 rounded-full text-white font-semibold text-[11px] transition">90%</button>
+                <button onclick="setUiZoom(100, 1)" id="zoom-1" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white text-[11px] transition">100%</button>
+                <button onclick="setUiZoom(110, 2)" id="zoom-2" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white text-[11px] transition">110%</button>
+              </div>
+            </div>
+
+            <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2.5 border border-white/[0.05]">
+              <div class="flex justify-between items-center">
+                <span class="font-semibold text-zinc-200">减少动效 (低配机更顺)</span>
+                <button onclick="toggleReduceMotion(this)" id="reduce-motion-btn" class="px-3 py-1 rounded-full bg-white/[0.08] text-zinc-300 text-[11px] font-medium">已关闭</button>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="font-semibold text-zinc-400">退出时自动保存工程</span>
+                <button disabled aria-disabled="true" class="px-3 py-1 rounded-full bg-white/[0.06] text-zinc-500 text-[11px] font-medium">暂未开放</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-3 border border-white/[0.05]">
+            <span class="font-semibold text-zinc-200 block">工程与导出文件存储</span>
+            <div class="flex items-center space-x-2">
+              <input id="export-dir-input" type="text" readonly value="默认：用户工作区目录" class="flex-1 bg-black/50 border border-white/10 rounded-full px-4 py-2 text-zinc-300 font-mono-num outline-none" />
+              <button onclick="pickExportDir()" class="px-4 py-2 rounded-full bg-white/[0.08] hover:bg-white/[0.14] text-zinc-200">更改目录</button>
+            </div>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-3 border border-white/[0.05]">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-zinc-200">登录态与 Cookie 来源 (yt-dlp)</span>
+              <span id="cookie-status" class="px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[10px]">未设置</span>
+            </div>
+            <div class="relative bg-black/50 p-1 rounded-full grid grid-cols-4 border border-white/[0.05] text-[11px]">
+              <div id="cookie-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[calc(25%-2px)] rounded-full bg-indigo-500 pointer-events-none"></div>
+              <button onclick="setCookieSource('', 0, this)" class="relative z-10 py-1.5 rounded-full text-white font-semibold transition">无</button>
+              <button onclick="setCookieSource('edge', 1, this)" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">Edge</button>
+              <button onclick="setCookieSource('chrome', 2, this)" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">Chrome</button>
+              <button onclick="setCookieSource('firefox', 3, this)" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">Firefox</button>
+            </div>
+            <p class="text-[10px] text-zinc-500 leading-relaxed">
+              ⚠️ 新版本 Edge / Chrome 可能启用应用绑定加密，浏览器直读不一定可用。本项目优先使用内置 B 站扫码登录；其他站点可按需导入 cookies.txt。浏览器 Cookie 读取仅作为可选能力，不保证所有浏览器配置均可解密。
+            </p>
+            <button onclick="importCookies()" class="magnetic-btn w-full py-2.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-200 font-semibold text-[11px] flex items-center justify-center space-x-1.5">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+              <span>一键导入 cookies.txt（自动扫描下载/桌面）</span>
+            </button>
+            <p class="text-[10px] text-zinc-500 leading-relaxed">
+              导入步骤：浏览器安装扩展「Get cookies.txt LOCALLY」→ 打开要下载的视频站并登录 → 点扩展导出 → 回应用点上面按钮，自动放进 bin 并生效。
+            </p>
+            <div class="grid grid-cols-2 gap-2.5">
+              <input id="proxy-input" type="text" placeholder="代理地址，如 http://127.0.0.1:7890" onchange="saveProxy(this.value)"
+                class="bg-black/50 border border-white/10 rounded-full px-4 py-2 text-zinc-300 font-mono-num outline-none focus:border-indigo-500" />
+              <button onclick="saveProxy(document.getElementById('proxy-input').value)" class="rounded-full bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 font-medium">保存代理</button>
+            </div>
+            <p class="text-[10px] text-zinc-500">代理用于访问 YouTube、推特等国外平台。填一次即可，下载时自动使用；国内平台不需要。</p>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2.5 border border-white/[0.05]">
+            <span class="font-semibold text-zinc-200 block">行为与启动</span>
+            <div class="flex justify-between items-center">
+              <span class="text-zinc-400">启动时自动检查更新</span>
+              <button disabled aria-disabled="true" class="px-3 py-1 rounded-full bg-white/[0.06] text-zinc-500 text-[11px] font-medium">暂未开放</button>
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-zinc-300">导出完成后自动打开所在文件夹</span>
+              <button id="pref-auto-open-btn" onclick="togglePrefFlag('autoOpenExport', this)" data-on="1" class="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-medium">已开启</button>
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-zinc-300">识别 / 压制完成后播放提示音</span>
+              <button id="pref-sound-btn" onclick="togglePrefFlag('completionSound', this)" data-on="1" class="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-medium">已开启</button>
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-zinc-400">关闭窗口时最小化到系统托盘</span>
+              <button disabled aria-disabled="true" class="px-3 py-1 rounded-full bg-white/[0.06] text-zinc-500 text-[11px] font-medium">暂未开放</button>
+            </div>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-3 border border-white/[0.05]">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-zinc-200">界面主题</span>
+              <span class="text-[11px] text-zinc-500">全局配色</span>
+            </div>
+            <div class="relative bg-black/50 p-1 rounded-full grid grid-cols-3 border border-white/[0.05] text-[11px]">
+              <div id="theme-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[calc(33.333%-2px)] rounded-full bg-indigo-500 pointer-events-none"></div>
+              <button onclick="setTheme('dark', 0, this)" class="relative z-10 py-1.5 rounded-full text-white font-semibold transition">暗色</button>
+              <button onclick="setTheme('light', 1, this)" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">亮色</button>
+              <button onclick="setTheme('system', 2, this)" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">跟随系统</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 引擎 -->
+        <div id="pref-page-engine" class="panel-view panel-hidden overflow-y-auto p-6 space-y-4">
+          <div>
+            <h3 class="text-sm font-bold text-white">算力加速与 AI 翻译引擎 (Compute & LLM)</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">自适应独显、核显与轻薄本 CPU 环境</p>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2.5 border border-white/[0.05]">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-zinc-200">本地语音识别计算设备</span>
+              <span id="detected-gpu-label" class="text-[11px] font-mono-num text-emerald-400">已自动识别本地 GPU 硬件加速</span>
+            </div>
+            <div class="relative bg-black/50 p-1 rounded-full grid grid-cols-3 border border-white/[0.05]">
+              <div id="compute-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[calc(33.333%-2px)] rounded-full bg-indigo-500 pointer-events-none"></div>
+              <button onclick="switchComputeMode('auto', 0)" id="cmp-0" class="relative z-10 py-1.5 rounded-full text-white font-semibold transition">智能自适应</button>
+              <button onclick="switchComputeMode('cuda', 1)" id="cmp-1" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">CUDA FP16</button>
+              <button onclick="switchComputeMode('cpu', 2)" id="cmp-2" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">CPU INT8</button>
+            </div>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2.5 border border-white/[0.05]">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-zinc-200">Faster-Whisper 语音模型规格</span>
+              <span id="whisper-vram-hint" class="text-[11px] text-zinc-400">显存占用约 1.6 GB · 极速高精度</span>
+            </div>
+            <div class="relative bg-black/50 p-1 rounded-full grid grid-cols-3 border border-white/[0.05]">
+              <div id="whisper-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[calc(33.333%-2px)] rounded-full bg-emerald-600 pointer-events-none"></div>
+              <button onclick="switchWhisperTier('large-v3-turbo', 0)" id="wsp-0" class="relative z-10 py-1.5 rounded-full text-white font-semibold transition">Large-v3-Turbo</button>
+              <button onclick="switchWhisperTier('medium', 1)" id="wsp-1" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">Medium</button>
+              <button onclick="switchWhisperTier('small', 2)" id="wsp-2" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">Small</button>
+            </div>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-3 border border-white/[0.05]">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-zinc-200">上下文精翻大模型服务商</span>
+              <span class="text-[11px] text-indigo-300">任意 OpenAI 兼容接口</span>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <button onclick="applyLlmPreset('deepseek')" class="px-2.5 py-1 rounded-full bg-indigo-500/20 hover:bg-indigo-500/35 text-indigo-200 text-[10px] font-medium border border-indigo-400/30">DeepSeek</button>
+              <button onclick="applyLlmPreset('openai')" class="px-2.5 py-1 rounded-full bg-white/[0.06] hover:bg-white/[0.14] text-zinc-300 text-[10px]">OpenAI</button>
+              <button onclick="applyLlmPreset('qwen')" class="px-2.5 py-1 rounded-full bg-white/[0.06] hover:bg-white/[0.14] text-zinc-300 text-[10px]">通义千问</button>
+              <button onclick="applyLlmPreset('kimi')" class="px-2.5 py-1 rounded-full bg-white/[0.06] hover:bg-white/[0.14] text-zinc-300 text-[10px]">Kimi</button>
+              <button onclick="applyLlmPreset('zhipu')" class="px-2.5 py-1 rounded-full bg-white/[0.06] hover:bg-white/[0.14] text-zinc-300 text-[10px]">智谱 GLM</button>
+              <button onclick="applyLlmPreset('siliconflow')" class="px-2.5 py-1 rounded-full bg-white/[0.06] hover:bg-white/[0.14] text-zinc-300 text-[10px]">硅基流动</button>
+              <button onclick="applyLlmPreset('ollama')" class="px-2.5 py-1 rounded-full bg-emerald-500/20 hover:bg-emerald-500/35 text-emerald-200 text-[10px] border border-emerald-400/30">本地 Ollama（免费）</button>
+            </div>
+            <div class="grid grid-cols-2 gap-2.5">
+              <input id="llm-base-url" type="text" placeholder="https://api.deepseek.com" class="bg-black/50 border border-white/10 rounded-full px-4 py-2 text-zinc-300 font-mono-num outline-none focus:border-indigo-500" />
+              <input id="llm-api-key" type="password" placeholder="sk-... 填你的 API Key" class="bg-black/50 border border-white/10 rounded-full px-4 py-2 text-zinc-300 font-mono-num outline-none focus:border-indigo-500" />
+            </div>
+            <div class="flex items-center space-x-2">
+              <input id="llm-model" type="text" value="deepseek-chat" placeholder="模型名" class="flex-1 bg-black/50 border border-white/10 rounded-full px-4 py-2 text-zinc-300 font-mono-num outline-none focus:border-indigo-500" />
+              <button id="save-llm-btn" onclick="saveLlmSettings()" class="magnetic-btn px-4 py-2 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white font-semibold text-[11px] shrink-0">保存 Key</button>
+              <button onclick="testApiKey()" class="px-4 py-2 rounded-full bg-white/[0.08] hover:bg-white/[0.14] text-zinc-200 text-[11px] shrink-0">测试连通</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2.5">
+            <div class="bg-white/[0.03] rounded-[20px] p-3 space-y-1.5 border border-white/[0.05]">
+              <div class="flex justify-between text-[11px]"><span class="text-zinc-400">温度</span><span id="temp-val" class="font-mono-num text-indigo-300">0.30</span></div>
+              <input id="slider-temp" type="range" min="0" max="100" value="30" oninput="uiCfg('temp', this.value/100, this)" class="w-full" />
+            </div>
+            <div class="bg-white/[0.03] rounded-[20px] p-3 space-y-1.5 border border-white/[0.05]">
+              <div class="flex justify-between text-[11px]"><span class="text-zinc-400">批量</span><span id="batch-val" class="font-mono-num text-indigo-300">12 条</span></div>
+              <input id="slider-batch" type="range" min="1" max="30" value="12" oninput="uiCfg('batch', this.value, this)" class="w-full" />
+            </div>
+            <div class="bg-white/[0.03] rounded-[20px] p-3 space-y-1.5 border border-white/[0.05]">
+              <div class="flex justify-between text-[11px]"><span class="text-zinc-400">上下文</span><span id="ctx-val" class="font-mono-num text-indigo-300">3 条</span></div>
+              <input id="slider-ctx" type="range" min="0" max="8" value="3" oninput="uiCfg('context', this.value, this)" class="w-full" />
+            </div>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[20px] p-4 flex items-center justify-between border border-white/[0.05]">
+            <div>
+              <div class="font-semibold text-zinc-200">术语强制锁定</div>
+              <div class="text-[11px] text-zinc-400 mt-0.5">开启：术语必须原样出现在译文里（适合专业/技术视频）；关闭：翻译更自然，不套术语</div>
+            </div>
+            <button onclick="toggleTermLock(this)" id="term-lock-btn" class="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-medium">已开启</button>
+          </div>
+        </div>
+
+        <!-- 渲染清晰度 -->
+        <div id="pref-page-render" class="panel-view panel-hidden overflow-y-auto p-6 space-y-4">
+          <div>
+            <h3 class="text-sm font-bold text-white">渲染清晰度与导出 (Render Quality)</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">这一页直接决定导出 ASS 的 PlayRes 与字号倍率，也决定硬压 MP4 的分辨率</p>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2.5 border border-white/[0.05]">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-zinc-200">输出分辨率</span>
+              <span id="res-readout" class="text-[11px] font-mono-num text-sky-300">1920 × 1080</span>
+            </div>
+            <div id="res-picker" class="relative bg-black/50 p-1 rounded-full grid grid-cols-5 border border-white/[0.05] text-[11px]">
+              <button onclick="setResolution('original', 0)" id="res-0" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">原画</button>
+              <button onclick="setResolution('2160', 1)" id="res-1" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">4K</button>
+              <button onclick="setResolution('1080', 2)" id="res-2" class="relative z-10 py-1.5 rounded-full bg-indigo-500 text-white font-semibold transition">1080P</button>
+              <button onclick="setResolution('720', 3)" id="res-3" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">720P</button>
+              <button onclick="setResolution('480', 4)" id="res-4" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white transition">480P</button>
+            </div>
+            <div class="grid grid-cols-3 gap-2.5 pt-1">
+              <label class="space-y-1">
+                <span class="text-[10px] text-zinc-500">自定义宽</span>
+                <input id="res-w" type="number" value="1920" min="320" step="2" onchange="setCustomSize('w', this.value)"
+                  class="w-full bg-black/50 border border-white/10 rounded-full px-3 py-1.5 font-mono-num text-zinc-200 outline-none focus:border-sky-500" />
+              </label>
+              <label class="space-y-1">
+                <span class="text-[10px] text-zinc-500">自定义高</span>
+                <input id="res-h" type="number" value="1080" min="240" step="2" onchange="setCustomSize('h', this.value)"
+                  class="w-full bg-black/50 border border-white/10 rounded-full px-3 py-1.5 font-mono-num text-zinc-200 outline-none focus:border-sky-500" />
+              </label>
+              <label class="space-y-1">
+                <span class="text-[10px] text-zinc-500">帧率</span>
+                <select id="fps-sel" onchange="uiCfg('fps', this.value, this)"
+                  class="w-full bg-black/50 border border-white/10 rounded-full px-3 py-1.5 font-mono-num text-zinc-200 outline-none focus:border-sky-500">
+                  <option value="source">跟随源</option>
+                  <option value="24">24 fps</option>
+                  <option value="25">25 fps</option>
+                  <option value="30">30 fps</option>
+                  <option value="50">50 fps</option>
+                  <option value="60">60 fps</option>
+                  <option value="120">120 fps</option>
+                </select>
+              </label>
+            </div>
+            <p class="text-[10px] text-zinc-500 leading-relaxed">
+              字幕字号按「画布短边 ÷ 360」等比放大，与后端 SubtitleRenderer 用的是同一条换算公式：现在造型台里的 <span id="scale-demo">19</span>px 到 1080P 会自动变成 <span id="scale-demo-out">57</span>px。
+            </p>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-3 border border-white/[0.05]">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-zinc-200">画质（CRF 越低越清晰、体积越大）</span>
+              <span id="crf-val" class="font-mono-num text-sky-300">CRF 23</span>
+            </div>
+            <input type="range" min="14" max="32" value="23" oninput="setCrf(this.value)" class="w-full" />
+            <div class="flex justify-between text-[10px] text-zinc-500">
+              <span>14 · 近乎无损</span><span>23 · 平衡推荐</span><span>32 · 极致小体积</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2 border border-white/[0.05]">
+              <span class="font-semibold text-zinc-200 block">视频编码器</span>
+              <div class="relative bg-black/50 p-1 rounded-full grid grid-cols-2 border border-white/[0.05]">
+                <div id="enc-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-sky-500 pointer-events-none"></div>
+                <button onclick="setEncoder('auto', 0)" id="enc-0" class="relative z-10 py-1.5 rounded-full text-white font-semibold text-[11px] transition">自动(AV1/HEVC)</button>
+                <button onclick="setEncoder('x264', 1)" id="enc-1" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white text-[11px] transition">x264 兼容</button>
+              </div>
+            </div>
+
+            <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2 border border-white/[0.05]">
+              <span class="font-semibold text-zinc-200 block">音频码率</span>
+              <div class="relative bg-black/50 p-1 rounded-full grid grid-cols-3 border border-white/[0.05]">
+                <div id="abr-glider" class="glider-pill absolute top-1 bottom-1 left-1 w-[calc(33.333%-2px)] rounded-full bg-emerald-600 pointer-events-none"></div>
+                <button onclick="setAudioBitrate('128k', 0)" id="abr-0" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white text-[11px] transition">128k</button>
+                <button onclick="setAudioBitrate('192k', 1)" id="abr-1" class="relative z-10 py-1.5 rounded-full text-white font-semibold text-[11px] transition">192k</button>
+                <button onclick="setAudioBitrate('320k', 2)" id="abr-2" class="relative z-10 py-1.5 rounded-full text-zinc-400 hover:text-white text-[11px] transition">320k</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 flex items-center justify-between border border-white/[0.05]">
+            <div>
+              <div class="font-semibold text-zinc-200">导出时烧录字幕（硬压）</div>
+              <div class="text-[11px] text-zinc-400 mt-0.5">关闭只导出 SRT/ASS 轨，不重新编码视频</div>
+            </div>
+            <button id="pref-burn-sub-btn" onclick="toggleBurnSub(this)" data-on="1" class="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-medium">已开启</button>
+          </div>
+        </div>
+
+        <!-- 声效 -->
+        <div id="pref-page-audio" class="panel-view panel-hidden overflow-y-auto p-6 space-y-4">
+          <div>
+            <h3 class="text-sm font-bold text-white">分层级触感声效与外观 (Layered Audio & Appearance)</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">三类音效可单独静音，既保留把玩感又不吵人</p>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-3.5 border border-white/[0.05]">
+            <div class="grid grid-cols-2 gap-4">
+              <div class="space-y-1.5">
+                <div class="flex justify-between">
+                  <span class="font-semibold text-zinc-200">主按钮操作音量</span>
+                  <span id="master-vol-lbl" class="font-mono-num text-indigo-300">70%</span>
+                </div>
+                <input type="range" min="0" max="100" value="70" oninput="changeMasterVolume(this.value)" class="w-full" />
+                <div class="text-[10px] text-zinc-500">控制播放、拆分合并、切换选项卡</div>
+              </div>
+
+              <div class="space-y-1.5">
+                <div class="flex justify-between">
+                  <span class="font-semibold text-emerald-300">底部声纹与时间轴微音量</span>
+                  <span id="micro-vol-lbl" class="font-mono-num text-emerald-300">18% (柔音)</span>
+                </div>
+                <input type="range" min="0" max="100" value="18" oninput="changeMicroVolume(this.value)" class="w-full" />
+                <div class="text-[10px] text-zinc-500">控制声纹划过、时间轴与分屏推拉</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2.5 border border-white/[0.05]">
+            <div class="flex justify-between items-center">
+              <span class="font-semibold text-zinc-200">触感音色主题（点击切换并试听）</span>
+              <span class="text-[11px] text-zinc-400">带弹簧滑块过渡</span>
+            </div>
+
+            <div class="relative bg-black/55 p-1.5 rounded-[20px] grid grid-cols-5 border border-white/[0.05]">
+              <div id="sound-glider" class="glider-pill absolute top-1.5 bottom-1.5 left-1.5 w-[calc(20%-2.4px)] rounded-[15px] bg-gradient-to-b from-indigo-500/40 to-violet-600/30 border border-indigo-400/50 shadow-[0_0_20px_rgba(99,102,241,0.35)] pointer-events-none"></div>
+
+              <button onclick="setSoundProfile('mech', 0)" id="sp-0" class="relative z-10 py-2.5 rounded-[15px] text-center space-y-0.5 transition">
+                <div class="font-semibold text-white">机械轴</div><div class="text-[10px] text-zinc-400">浑厚客制</div>
+              </button>
+              <button onclick="setSoundProfile('harp', 1)" id="sp-1" class="relative z-10 py-2.5 rounded-[15px] text-center space-y-0.5 transition">
+                <div class="font-semibold text-zinc-300">水晶琴</div><div class="text-[10px] text-zinc-500">空灵泛音</div>
+              </button>
+              <button onclick="setSoundProfile('taptic', 2)" id="sp-2" class="relative z-10 py-2.5 rounded-[15px] text-center space-y-0.5 transition">
+                <div class="font-semibold text-zinc-300">线性马达</div><div class="text-[10px] text-zinc-500">极简低频</div>
+              </button>
+              <button onclick="setSoundProfile('synth', 3)" id="sp-3" class="relative z-10 py-2.5 rounded-[15px] text-center space-y-0.5 transition">
+                <div class="font-semibold text-zinc-300">合成器</div><div class="text-[10px] text-zinc-500">复古方波</div>
+              </button>
+              <button onclick="setSoundProfile('bubble', 4)" id="sp-4" class="relative z-10 py-2.5 rounded-[15px] text-center space-y-0.5 transition">
+                <div class="font-semibold text-zinc-300">温润水滴</div><div class="text-[10px] text-zinc-500">圆滑木琴</div>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2.5">
+            <div class="bg-white/[0.03] rounded-[20px] p-3 flex items-center justify-between border border-white/[0.05]">
+              <span class="text-[11px] text-zinc-300">按钮音</span>
+              <button onclick="toggleSfxChannel('btn', this)" data-on="1" class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px]">开</button>
+            </div>
+            <div class="bg-white/[0.03] rounded-[20px] p-3 flex items-center justify-between border border-white/[0.05]">
+              <span class="text-[11px] text-zinc-300">声纹泛音</span>
+              <button onclick="toggleSfxChannel('wave', this)" data-on="1" class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px]">开</button>
+            </div>
+            <div class="bg-white/[0.03] rounded-[20px] p-3 flex items-center justify-between border border-white/[0.05]">
+              <span class="text-[11px] text-zinc-300">推拉刻度音</span>
+              <button onclick="toggleSfxChannel('tick', this)" data-on="1" class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px]">开</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2 border border-white/[0.05]">
+              <span class="font-semibold text-zinc-200 block">界面氛围光晕</span>
+              <div class="flex space-x-2">
+                <button onclick="setAppAccent('#6366f1', 'rgba(99,102,241,0.42)', '星云紫')" class="flex-1 py-1.5 rounded-full bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 text-[11px]">星云紫</button>
+                <button onclick="setAppAccent('#10b981', 'rgba(16,185,129,0.4)', '极光翠')" class="flex-1 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[11px]">极光翠</button>
+                <button onclick="setAppAccent('#06b6d4', 'rgba(6,182,212,0.4)', '赛博青')" class="flex-1 py-1.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 text-[11px]">赛博青</button>
+              </div>
+            </div>
+            <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2 border border-white/[0.05]">
+              <div class="flex justify-between">
+                <span class="font-semibold text-zinc-200">按钮磁吸跟随感</span>
+                <span id="mag-val-label" class="font-mono-num text-indigo-300">20%</span>
+              </div>
+              <input type="range" min="0" max="40" value="20" oninput="changeMagneticPull(this.value)" class="w-full" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 快捷键 -->
+        <div id="pref-page-shortcuts" class="panel-view panel-hidden overflow-y-auto p-6 space-y-4">
+          <div>
+            <h3 class="text-sm font-bold text-white">全局键盘热键与缓存管理</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">高频剪辑热键与本地临时音频清理</p>
+          </div>
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2.5 border border-white/[0.05]">
+            <div class="flex justify-between py-1 border-b border-white/[0.05]"><span>播放 / 暂停预览</span><kbd class="px-2.5 py-0.5 rounded-full bg-white/10 font-mono-num">Space</kbd></div>
+            <div class="flex justify-between py-1 border-b border-white/[0.05]"><span>将当前字幕段一分为二</span><kbd class="px-2.5 py-0.5 rounded-full bg-white/10 font-mono-num">S</kbd></div>
+            <div class="flex justify-between py-1 border-b border-white/[0.05]"><span>与下一句合并</span><kbd class="px-2.5 py-0.5 rounded-full bg-white/10 font-mono-num">M</kbd></div>
+            <div class="flex justify-between py-1 border-b border-white/[0.05]"><span>上一句 / 下一句</span><kbd class="px-2.5 py-0.5 rounded-full bg-white/10 font-mono-num">↑ / ↓</kbd></div>
+            <div class="flex justify-between py-1 border-b border-white/[0.05]"><span>双击分界杆复位 58 : 42</span><kbd class="px-2.5 py-0.5 rounded-full bg-white/10 font-mono-num">Double Click</kbd></div>
+            <div class="flex justify-between py-1 border-b border-white/[0.05]"><span>折叠 / 展开右舱</span><kbd class="px-2.5 py-0.5 rounded-full bg-white/10 font-mono-num">Ctrl + B</kbd></div>
+            <div class="flex justify-between py-1"><span>多步撤销修改</span><kbd class="px-2.5 py-0.5 rounded-full bg-white/10 font-mono-num">Ctrl + Z</kbd></div>
+          </div>
+          <div class="bg-white/[0.03] rounded-[24px] p-4 flex items-center justify-between border border-white/[0.05]">
+            <div>
+              <div class="font-semibold text-zinc-200">临时 16kHz WAV 音频与预览缓存</div>
+              <div id="cache-size-label" class="text-[11px] text-zinc-400 mt-0.5">当前占用空间：统计中…</div>
+            </div>
+            <button onclick="clearWorkspaceCache()" class="magnetic-btn px-4 py-2 rounded-full bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-medium">一键清理缓存</button>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2 border border-white/[0.05]">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-zinc-400">工程文件自动保存</span>
+              <button disabled aria-disabled="true" id="autosave-btn" class="px-3 py-1 rounded-full bg-white/[0.06] text-zinc-500 text-[11px] font-medium">暂未开放</button>
+            </div>
+            <p class="text-[10px] text-zinc-500">当前版本自动持久化配置与导出路径；工程文件（.subflow）草稿快照将在后续版本开放。</p>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-3 border border-white/[0.05]">
+            <span class="font-semibold text-zinc-200 block">导出文件命名模板</span>
+            <div class="flex items-center space-x-2">
+              <input id="export-name-tpl" type="text" value="{title}_{lang}_{res}" onchange="setExportNameTpl(this.value)"
+                class="flex-1 bg-black/50 border border-white/10 rounded-full px-4 py-2 text-zinc-300 font-mono-num outline-none focus:border-violet-500" />
+              <button onclick="toast('可用变量：{title} {lang} {res} {date} {time}')" class="px-3 py-2 rounded-full bg-white/[0.08] hover:bg-white/[0.14] text-zinc-200 shrink-0 text-[11px]">变量</button>
+            </div>
+            <p class="text-[10px] text-zinc-500">例如 <span class="font-mono-num">{title}_{res}p</span> → 视频名_1080p.srt</p>
+          </div>
+        </div>
+
+        <!-- 关于 -->
+        <div id="pref-page-about" class="panel-view panel-hidden overflow-y-auto p-6 space-y-4">
+          <div>
+            <h3 class="text-sm font-bold text-white">关于 SubFlow Studio</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">技术栈、版本与更新</p>
+          </div>
+
+          <div class="bg-gradient-to-br from-indigo-500/15 to-violet-500/10 rounded-[28px] p-5 border border-white/[0.08] flex items-center space-x-4">
+            <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-500 to-violet-500 flex items-center justify-center shadow-[0_0_25px_rgba(99,102,241,0.5)]">
+              <div class="w-5 h-5 rounded-full bg-white/90"></div>
+            </div>
+            <div>
+              <div class="text-base font-bold text-white">SubFlow Studio <span class="text-[11px] font-mono-num text-indigo-300 font-normal">V9.2</span></div>
+              <div class="text-[11px] text-zinc-400 mt-1">外网视频双语字幕工作台</div>
+              <div class="text-[11px] text-zinc-500">PyWebView · faster-whisper · DeepSeek · FFmpeg</div>
+            </div>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-2 border border-white/[0.05] text-[11px]">
+            <div class="flex justify-between py-1 border-b border-white/[0.05]"><span class="text-zinc-400">当前版本</span><span class="font-mono-num text-zinc-200">V9.2.0</span></div>
+            <div class="flex justify-between py-1 border-b border-white/[0.05]"><span class="text-zinc-400">后端核心</span><span class="font-mono-num text-zinc-200">core_pipeline.py</span></div>
+            <div class="flex justify-between py-1 border-b border-white/[0.05]"><span class="text-zinc-400">语音引擎</span><span class="font-mono-num text-zinc-200">faster-whisper</span></div>
+            <div class="flex justify-between py-1 border-b border-white/[0.05]"><span class="text-zinc-400">翻译引擎</span><span class="font-mono-num text-zinc-200">DeepSeek</span></div>
+            <div class="flex justify-between py-1"><span class="text-zinc-400">压制引擎</span><span class="font-mono-num text-zinc-200">FFmpeg (NVENC)</span></div>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 space-y-3 border border-white/[0.05]">
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-zinc-200">检查更新</span>
+              <button onclick="checkUpdate()" class="magnetic-btn px-4 py-2 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white font-semibold text-[11px]">检查更新</button>
+            </div>
+            <div id="update-status" class="text-[11px] text-zinc-500">当前已是最新版本</div>
+          </div>
+
+          <div class="bg-white/[0.03] rounded-[24px] p-4 border border-white/[0.05] text-[11px] text-zinc-500 leading-relaxed">
+            <span class="font-semibold text-zinc-300 block mb-1">快捷键速查</span>
+            <span class="font-mono-num">Space</span> 播放 · <span class="font-mono-num">S</span> 拆分 · <span class="font-mono-num">M</span> 合并 · <span class="font-mono-num">↑↓</span> 上下句 · <span class="font-mono-num">Ctrl+Z</span> 撤销 · <span class="font-mono-num">Ctrl+B</span> 折叠右舱
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- B站扫码登录 -->
+  <div id="bili-login-modal" onclick="if(event.target===this) closeBiliLogin()" class="hidden fixed inset-0 bg-black/65 backdrop-blur-md flex items-center justify-center z-50">
+    <div class="glass-surface rounded-[32px] w-full max-w-xs p-6 space-y-4 text-xs flex flex-col items-center">
+      <div class="flex justify-between items-center w-full">
+        <span class="text-sm font-semibold text-[#fb7299]">B站扫码登录</span>
+        <button onclick="closeBiliLogin()" class="w-7 h-7 rounded-full bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center text-zinc-400 hover:text-white">✕</button>
+      </div>
+      <div class="p-3 rounded-2xl bg-white">
+        <img id="bili-qr-img" alt="B站登录二维码" class="w-48 h-48 rounded-lg" />
+      </div>
+      <div id="bili-qr-status" class="text-[12px] text-zinc-300 font-medium">正在生成二维码…</div>
+      <p class="text-[10px] text-zinc-500 text-center leading-relaxed">打开手机 B站 App → 右上角「扫一扫」→ 扫码并确认登录</p>
+    </div>
+  </div>
+
+  <!-- 本地 Ollama 自动安装 -->
+  <div id="ollama-modal" onclick="if(event.target===this) closeModal('ollama-modal')" class="hidden fixed inset-0 bg-black/65 backdrop-blur-md flex items-center justify-center z-50">
+    <div class="glass-surface rounded-[32px] w-full max-w-sm p-6 space-y-3.5 text-xs">
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-semibold text-emerald-300">本地 Ollama（免费翻译引擎）</span>
+        <button onclick="closeModal('ollama-modal')" class="w-7 h-7 rounded-full bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center text-zinc-400 hover:text-white">✕</button>
+      </div>
+      <div id="ollama-body" class="text-zinc-300 leading-relaxed"></div>
+      <div class="h-1.5 rounded-full bg-white/10 overflow-hidden">
+        <div id="ollama-progress-bar" class="h-full bg-emerald-400 transition-all duration-300" style="width:0%"></div>
+      </div>
+      <div id="ollama-status" class="text-[11px] text-zinc-400"></div>
+      <div class="flex space-x-2 pt-1">
+        <button id="ollama-action-btn" onclick="startOllamaSetup()" class="flex-1 py-2.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-white font-semibold text-[11px]">自动下载安装</button>
+        <button onclick="closeModal('ollama-modal')" class="px-4 py-2.5 rounded-full bg-white/[0.08] hover:bg-white/[0.14] text-zinc-300 text-[11px]">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- P0-1: Large-v3-Turbo 首次 1.5GB 下载确认弹窗 -->
+  <div id="large-model-modal" onclick="if(event.target===this) closeModal('large-model-modal')" class="hidden fixed inset-0 bg-black/65 backdrop-blur-md flex items-center justify-center z-50">
+    <div class="glass-surface rounded-[32px] w-full max-w-md p-6 space-y-4 text-xs">
+      <div class="flex justify-between items-center">
+        <span class="text-sm font-semibold text-amber-300">首次下载 1.5GB 语音模型确认</span>
+        <button onclick="closeModal('large-model-modal')" class="w-7 h-7 rounded-full bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center text-zinc-400 hover:text-white">✕</button>
+      </div>
+      <p class="text-zinc-300 leading-relaxed">
+        当前选用高精度模型 <b class="text-white">Large-v3-Turbo</b>，本机尚未缓存，首次使用需联网下载约 <b class="text-amber-300">1.5 GB</b>。<br><br>
+        想要更快看到结果？推荐改用 <b class="text-emerald-300">Small 模型（约 460 MB，速度快 3 倍）</b>，日常英语/日语视频同样准确。
+      </p>
+      <div class="flex space-x-2.5 pt-1">
+        <button onclick="confirmLargeModelChoice('small')" class="flex-1 py-2.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-white font-semibold text-[11px]">改用 Small（推荐，快3倍）</button>
+        <button onclick="confirmLargeModelChoice('large-v3-turbo')" class="flex-1 py-2.5 rounded-full bg-white/[0.1] hover:bg-white/[0.16] text-zinc-200 font-medium text-[11px]">继续用 Large (1.5GB)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- P1-7: 首次运行 30 秒极速上手引导弹窗 -->
+  <div id="onboarding-modal" onclick="if(event.target===this) dismissOnboarding()" class="hidden fixed inset-0 bg-black/65 backdrop-blur-md flex items-center justify-center z-50">
+    <div class="glass-surface rounded-[32px] w-full max-w-lg p-6 space-y-4 text-xs">
+      <div class="flex justify-between items-center">
+        <div>
+          <span class="text-sm font-bold text-white">欢迎使用 SubFlow Studio · 30 秒极速上手</span>
+          <p class="text-[11px] text-zinc-400 mt-0.5">无需复杂配置，4 步即可把外语视频变成双语成片</p>
+        </div>
+        <button onclick="dismissOnboarding()" class="w-7 h-7 rounded-full bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center text-zinc-400 hover:text-white">✕</button>
+      </div>
+
+      <div class="space-y-2.5">
+        <div class="bg-white/[0.03] rounded-2xl p-3.5 border border-white/[0.06] flex items-center justify-between">
+          <div>
+            <div class="font-semibold text-zinc-200">① 运行环境与硬件加速</div>
+            <div id="ob-hw-status" class="text-[11px] text-emerald-300 mt-0.5">WebView2 与 FFmpeg 已就绪</div>
+          </div>
+          <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[10px] font-mono-num">READY</span>
+        </div>
+
+        <div class="bg-white/[0.03] rounded-2xl p-3.5 border border-white/[0.06] flex items-center justify-between">
+          <div>
+            <div class="font-semibold text-zinc-200">② 选择语音识别模型</div>
+            <div class="text-[11px] text-zinc-400 mt-0.5">首次使用推荐 Small（约 460MB，速度快 3 倍）</div>
+          </div>
+          <div class="flex space-x-1.5">
+            <button onclick="switchWhisperTier('small', 2, true); toast('已选用 Small 轻量快速模型');" class="px-3 py-1 rounded-full bg-emerald-500/20 hover:bg-emerald-500/35 text-emerald-200 text-[10px] font-semibold">Small (推荐)</button>
+            <button onclick="switchWhisperTier('large-v3-turbo', 0, true); toast('已选用 Large-v3-Turbo 高精度模型');" class="px-3 py-1 rounded-full bg-white/[0.07] hover:bg-white/[0.14] text-zinc-300 text-[10px]">Large (1.5GB)</button>
+          </div>
+        </div>
+
+        <div class="bg-white/[0.03] rounded-2xl p-3.5 border border-white/[0.06] flex items-center justify-between">
+          <div>
+            <div class="font-semibold text-zinc-200">③ 配置 AI 翻译引擎（支持 DeepSeek / 通义 / 免费 Ollama）</div>
+            <div id="ob-key-status" class="text-[11px] text-zinc-400 mt-0.5">填入 API Key 即可一键精翻并自动区分双人对话 A/B</div>
+          </div>
+          <button onclick="dismissOnboarding(); openModal('preferences-modal'); switchPrefTab('engine', 1);" class="px-3 py-1 rounded-full bg-indigo-500/25 hover:bg-indigo-500/40 text-indigo-200 text-[10px] font-semibold shrink-0">去填 Key</button>
+        </div>
+
+        <div class="bg-gradient-to-r from-indigo-500/20 to-emerald-500/15 rounded-2xl p-4 border border-indigo-400/30 flex items-center justify-between">
+          <div>
+            <div class="font-bold text-white text-[13px]">④ 还没填 Key？先用内置 10 秒示例看成品！</div>
+            <div class="text-[11px] text-zinc-300 mt-0.5">免 Key、免下载模型，立即体验双人双语字幕跟读、调色与导出成片</div>
+          </div>
+          <button onclick="runQuickstartDemo()" class="magnetic-btn px-4 py-2 rounded-full bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-[11px] shadow-lg shrink-0">⚡ 10秒看成品</button>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-1">
+        <button onclick="dismissOnboarding()" class="px-4 py-1.5 rounded-full bg-white/[0.07] hover:bg-white/[0.12] text-zinc-300 text-[11px]">跳过引导，直接开始</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导出 -->
+  <div id="export-modal" onclick="if(event.target===this) closeModal('export-modal')" class="hidden fixed inset-0 bg-black/65 backdrop-blur-md flex items-center justify-center z-50">
+    <div class="glass-surface rounded-[32px] w-full max-w-md p-6 space-y-4 text-xs">
+      <div class="flex justify-between items-center">
+        <span class="text-sm font-semibold text-white">导出双语成片与字幕轨</span>
+        <button onclick="closeModal('export-modal')" class="w-7 h-7 rounded-full bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center text-zinc-400 hover:text-white">✕</button>
+      </div>
+
+      <div class="flex items-center justify-between bg-black/40 rounded-full px-3.5 py-2 text-[11px]">
+        <span class="text-zinc-500">当前渲染清晰度</span>
+        <span id="export-res-badge" class="font-mono-num text-sky-300">1920 × 1080 · CRF 23</span>
+      </div>
+
+      <div class="space-y-2.5">
+        <button onclick="downloadFile('srt')" class="magnetic-btn w-full p-4 rounded-[22px] bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-between">
+          <div class="text-left">
+            <div class="font-semibold text-white text-[13px]">导出标准双语 .SRT</div>
+            <div class="text-[11px] text-zinc-400 mt-0.5">直拖剪映专业版 / Premiere / DaVinci</div>
+          </div>
+          <span class="px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 font-mono-num">下载</span>
+        </button>
+        <button onclick="downloadFile('ass')" class="magnetic-btn w-full p-4 rounded-[22px] bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-between">
+          <div class="text-left">
+            <div class="font-semibold text-amber-300 text-[13px]">导出高定样式 .ASS</div>
+            <div class="text-[11px] text-zinc-400 mt-0.5">保留调色台 / 字号 / 边距，按当前分辨率换算 PlayRes</div>
+          </div>
+          <span class="px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 font-mono-num">下载</span>
+        </button>
+        <button id="export-burn-btn" onclick="triggerNvencBurn()" class="magnetic-btn w-full p-4 rounded-[22px] bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white flex items-center justify-between shadow-lg shadow-indigo-600/30">
+          <div class="text-left">
+            <div class="font-semibold text-[13px]">硬件编码加速硬压 MP4</div>
+            <div id="export-burn-desc" class="text-[11px] text-indigo-200 mt-0.5">自动匹配本机最佳编码器 (NVENC / libx264)</div>
+          </div>
+          <span id="export-burn-tag" class="px-3 py-1 rounded-full bg-white/20 font-mono-num font-bold">启动</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-box" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+  <!-- 自定义右键菜单（WebView2 默认右键被禁用，这里自己实现） -->
+  <div id="ctx-menu" class="hidden fixed z-[200] min-w-[132px] py-1.5 rounded-2xl bg-[#15151c]/98 backdrop-blur-xl border border-white/10 shadow-[0_16px_50px_rgba(0,0,0,0.8)] text-[12px] text-zinc-200 select-none">
+    <button onclick="ctxAction('paste')" class="w-full px-3.5 py-1.5 text-left hover:bg-indigo-500/25 flex items-center justify-between">
+      <span>粘贴</span><span class="text-[10px] text-zinc-500 font-mono-num">Ctrl+V</span>
+    </button>
+    <button onclick="ctxAction('copy')" class="w-full px-3.5 py-1.5 text-left hover:bg-indigo-500/25 flex items-center justify-between">
+      <span>复制</span><span class="text-[10px] text-zinc-500 font-mono-num">Ctrl+C</span>
+    </button>
+    <button onclick="ctxAction('cut')" class="w-full px-3.5 py-1.5 text-left hover:bg-indigo-500/25 flex items-center justify-between">
+      <span>剪切</span><span class="text-[10px] text-zinc-500 font-mono-num">Ctrl+X</span>
+    </button>
+    <div class="my-1 h-px bg-white/10"></div>
+    <button onclick="ctxAction('selectall')" class="w-full px-3.5 py-1.5 text-left hover:bg-indigo-500/25 flex items-center justify-between">
+      <span>全选</span><span class="text-[10px] text-zinc-500 font-mono-num">Ctrl+A</span>
+    </button>
+  </div>
+
+  <!-- 居中红色错误横幅 -->
+  <div id="error-banner" class="hidden fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] pointer-events-none transition-all duration-300">
+    <div class="px-7 py-4 rounded-2xl bg-red-600/92 backdrop-blur-md shadow-[0_8px_50px_rgba(239,68,68,0.55)] border border-red-400/60 max-w-md text-center">
+      <div class="text-white text-sm font-bold mb-1.5">⚠️ 操作失败</div>
+      <div id="error-banner-text" class="text-red-50 text-xs leading-relaxed break-words"></div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="bridge.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

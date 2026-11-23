@@ -1,0 +1,162 @@
+[
+  {
+    "id": 1,
+    "lang": "en",
+    "src": "So, what do you think about that?",
+    "bad": "所以，你认为那个怎么样？",
+    "good": "那你觉得怎么样？",
+    "must_keep": []
+  },
+  {
+    "id": 2,
+    "lang": "en",
+    "src": "I'm gonna go ahead and get started.",
+    "bad": "我将会前进并且开始。",
+    "good": "那我先开始了。",
+    "must_keep": []
+  },
+  {
+    "id": 3,
+    "lang": "en",
+    "src": "It turns out we were wrong all along.",
+    "bad": "它变成我们自始至终是错误的。",
+    "good": "结果发现我们一直都想错了。",
+    "must_keep": []
+  },
+  {
+    "id": 4,
+    "lang": "en",
+    "src": "Fair enough, let's call it a day.",
+    "bad": "足够公平，让我们叫它一天。",
+    "good": "说得有道理，今天就先到这吧。",
+    "must_keep": []
+  },
+  {
+    "id": 5,
+    "lang": "en",
+    "src": "At the end of the day, performance is what matters.",
+    "bad": "在一天的结束，性能是重要的东西。",
+    "good": "归根结底，性能才是最关键的。",
+    "must_keep": []
+  },
+  {
+    "id": 6,
+    "lang": "en",
+    "src": "No wonder this 1080P video renders so fast on the RTX 3060.",
+    "bad": "没有奇迹这个 1080P 视频渲染如此快在 RTX 3060 上。",
+    "good": "难怪这段 1080P 视频在 RTX 3060 上渲染这么快。",
+    "must_keep": ["1080P", "RTX 3060"]
+  },
+  {
+    "id": 7,
+    "lang": "en",
+    "src": "Rarely have I seen such a clean user interface.",
+    "bad": "罕见地我有看见如此一个干净的用户界面。",
+    "good": "我很少见到这么清爽的界面。",
+    "must_keep": []
+  },
+  {
+    "id": 8,
+    "lang": "en",
+    "src": "The configuration file was overwritten by mistake.",
+    "bad": "配置文件被通过错误覆盖了。",
+    "good": "配置文件不小心被覆盖了。",
+    "must_keep": []
+  },
+  {
+    "id": 9,
+    "lang": "en",
+    "src": "Could you walk me through how the USB-C power delivery works?",
+    "bad": "你能走我穿过 USB-C 电力投递怎么工作吗？",
+    "good": "能给我讲讲 USB-C 供电是怎么工作的吗？",
+    "must_keep": ["USB-C"]
+  },
+  {
+    "id": 10,
+    "lang": "en",
+    "src": "That makes total sense, thanks for pointing it out.",
+    "bad": "那制造完全的感觉，谢谢指出它。",
+    "good": "太有道理了，谢谢你提醒我。",
+    "must_keep": []
+  },
+  {
+    "id": 11,
+    "lang": "ja",
+    "src": "こんにちは",
+    "bad": "中午好",
+    "good": "你好",
+    "must_keep": []
+  },
+  {
+    "id": 12,
+    "lang": "ja",
+    "src": "はい、そうですよ。",
+    "bad": "对 是的。",
+    "good": "是的。",
+    "must_keep": []
+  },
+  {
+    "id": 13,
+    "lang": "ja",
+    "src": "あの、すみません。ここはロボット大学ですか？",
+    "bad": "那个，对不起。这里是机器人大学吗？",
+    "good": "请问一下，这里是机器人大学吗？",
+    "must_keep": []
+  },
+  {
+    "id": 14,
+    "lang": "ja",
+    "src": "じゃあ一緒に行きましょう。",
+    "bad": "那么一起去吧。",
+    "good": "那我们一起走吧。",
+    "must_keep": []
+  },
+  {
+    "id": 15,
+    "lang": "ja",
+    "src": "今度秋葉研究室に新しく入る人ね。",
+    "bad": "这次秋叶研究室新进入的人呢。",
+    "good": "你就是这次新进秋叶研究室的人吧。",
+    "must_keep": []
+  },
+  {
+    "id": 16,
+    "lang": "en",
+    "src": "We cut the latency from 250ms down to 16ms.",
+    "bad": "我们切延迟从 250ms 下到 16ms。",
+    "good": "我们把延迟从 250ms 降到了 16ms。",
+    "must_keep": ["250", "16"]
+  },
+  {
+    "id": 17,
+    "lang": "en",
+    "src": "To be honest, I didn't see that coming.",
+    "bad": "为了诚实，我没有看见那个到来。",
+    "good": "说实话，我真没料到会这样。",
+    "must_keep": []
+  },
+  {
+    "id": 18,
+    "lang": "en",
+    "src": "Hold on a second, let me double check the frame rate.",
+    "bad": "握住一秒，让我双倍检查帧率。",
+    "good": "稍等一下，我再确认下帧率。",
+    "must_keep": []
+  },
+  {
+    "id": 19,
+    "lang": "en",
+    "src": "Feel free to reach out if you run into any issues.",
+    "bad": "感觉自由伸出如果你跑进任何问题。",
+    "good": "如果遇到任何问题，随时联系我。",
+    "must_keep": []
+  },
+  {
+    "id": 20,
+    "lang": "en",
+    "src": "This batch of 300 subtitles took only 11 seconds.",
+    "bad": "这一批 300 字幕只拿了 11 秒。",
+    "good": "这批 300 条字幕只花了 11 秒。",
+    "must_keep": ["300", "11"]
+  }
+]
